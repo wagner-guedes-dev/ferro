@@ -37,12 +37,17 @@ def chave_api():
 
 
 # Senha de acesso (obrigatória ao publicar online). Sem APP_PASSWORD, o site fica aberto.
-SENHA = ler_env("APP_PASSWORD")
-TOKEN = hmac.new(SENHA.encode(), b"ferro-sessao", hashlib.sha256).hexdigest() if SENHA else ""
+# APP_PASSWORD abre o plano "ele"; APP_PASSWORD_ELA abre o plano "ela". O mesmo site atende os dois.
+SENHAS = {p: v for p, v in (("ele", ler_env("APP_PASSWORD")), ("ela", ler_env("APP_PASSWORD_ELA"))) if v}
+SENHA = bool(SENHAS)
+
+
+def token_de(perfil):
+    return hmac.new(SENHAS[perfil].encode(), b"ferro-sessao-" + perfil.encode(), hashlib.sha256).hexdigest()
 
 
 # Perfil do site: "ele" ou "ela" (variável APP_PERFIL). Define o plano carregado e a persona da IA.
-PERFIL = ler_env("APP_PERFIL") or "ele"
+PERFIL = ler_env("APP_PERFIL") or "ele"  # perfil usado quando não há senha (uso local)
 if PERFIL not in ("ele", "ela"):
     PERFIL = "ele"
 
@@ -58,8 +63,7 @@ Perfil: 1,66 m, 66 kg, objetivo ganhar massa muscular. Treina de segunda a sexta
 Perfil: mulher, 1,64 m, 60 kg, objetivo ganhar massa magra com ênfase em glúteos e pernas. Treina de segunda a sexta (glúteo+posterior, costas+bíceps, quadríceps+panturrilha, peito+ombro+tríceps, glúteo+perna completa); sábado e domingo descansa. Rotina: acorda 05:30, treina às 06:30, dorme 21:30; refeições: pré-treino 05:50, café pós-treino 07:45, lanche 10:30, almoço 12:30, lanche 16:00, jantar 19:00, ceia 20:45. Meta: ~2200 kcal, ~120 g de proteína, 2,3 L de água.
 """,
 }
-SISTEMA = SISTEMAS[PERFIL] + ESTILO
-ARQUIVO_DADOS = os.path.join(RAIZ, "data", f"dados-{PERFIL}.json")
+
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -74,14 +78,23 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(corpo)
 
-    def autenticado(self):
+    def perfil_sessao(self):
+        """Perfil da sessão (pelo cookie), ou None se não estiver logado."""
         if not SENHA:
-            return True
+            return PERFIL
         for parte in self.headers.get("Cookie", "").split(";"):
             k, _, v = parte.strip().partition("=")
-            if k == "sessao" and hmac.compare_digest(v, TOKEN):
-                return True
-        return False
+            if k == "sessao":
+                p, _, tok = v.partition(".")
+                if p in SENHAS and hmac.compare_digest(tok, token_de(p)):
+                    return p
+        return None
+
+    def autenticado(self):
+        return self.perfil_sessao() is not None
+
+    def arquivo_dados(self):
+        return os.path.join(RAIZ, "data", f"dados-{self.perfil_sessao() or PERFIL}.json")
 
     def do_GET(self):
         caminho = self.path.split("?")[0]
@@ -95,12 +108,12 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if caminho == "/api/dados":
             try:
-                with open(ARQUIVO_DADOS, encoding="utf-8") as f:
+                with open(self.arquivo_dados(), encoding="utf-8") as f:
                     return self._json(200, json.load(f))
             except (OSError, ValueError):
                 return self._json(200, {"ts": 0, "dados": {}})
         if caminho == "/perfil.js":
-            with open(os.path.join(RAIZ, f"perfil-{PERFIL}.js"), "rb") as f:
+            with open(os.path.join(RAIZ, f"perfil-{self.perfil_sessao() or PERFIL}.js"), "rb") as f:
                 corpo = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "application/javascript; charset=utf-8")
@@ -118,11 +131,14 @@ class Handler(SimpleHTTPRequestHandler):
             senha = str(json.loads(self.rfile.read(min(n, 2000))).get("senha", ""))
         except (ValueError, AttributeError):
             return self._json(400, {"erro": "Requisição inválida."})
-        if not SENHA or hmac.compare_digest(senha.encode(), SENHA.encode()):
+        perfil = next((p for p, v in SENHAS.items() if hmac.compare_digest(senha.encode(), v.encode())), None)
+        if not SENHA:
+            perfil = PERFIL
+        if perfil:
             corpo = json.dumps({"ok": True}).encode()
             self.send_response(200)
             seguro = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
-            self.send_header("Set-Cookie", f"sessao={TOKEN}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax{seguro}")
+            self.send_header("Set-Cookie", f"sessao={perfil}.{token_de(perfil) if SENHA else 'x'}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax{seguro}")
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(corpo)))
             self.end_headers()
@@ -143,8 +159,9 @@ class Handler(SimpleHTTPRequestHandler):
             assert isinstance(dados.get("dados"), dict)
         except (ValueError, AssertionError, AttributeError):
             return self._json(400, {"erro": "Dados inválidos."})
-        os.makedirs(os.path.dirname(ARQUIVO_DADOS), exist_ok=True)
-        with open(ARQUIVO_DADOS, "w", encoding="utf-8") as f:
+        arq = self.arquivo_dados()
+        os.makedirs(os.path.dirname(arq), exist_ok=True)
+        with open(arq, "w", encoding="utf-8") as f:
             json.dump(dados, f, ensure_ascii=False)
         self._json(200, {"ok": True})
 
@@ -166,7 +183,7 @@ class Handler(SimpleHTTPRequestHandler):
             contexto = str(dados.get("contexto", ""))[:4000]
         except (ValueError, KeyError, TypeError):
             return self._json(400, {"erro": "Requisição inválida."})
-        corpo = json.dumps({"model": MODELO, "max_tokens": 900, "system": SISTEMA + contexto, "messages": msgs}).encode()
+        corpo = json.dumps({"model": MODELO, "max_tokens": 900, "system": SISTEMAS[self.perfil_sessao() or PERFIL] + ESTILO + contexto, "messages": msgs}).encode()
         req = urllib.request.Request(
             "https://api.anthropic.com/v1/messages", data=corpo, method="POST",
             headers={"x-api-key": chave, "anthropic-version": "2023-06-01", "content-type": "application/json"})
@@ -198,6 +215,6 @@ if __name__ == "__main__":
     print(f"No PC:      http://localhost:{PORT}")
     print(f"No celular: http://{ip}:{PORT}  (mesmo Wi-Fi do PC)")
     print(f"Perfil: {PERFIL}")
-    print(f"Senha: {'ativada' if SENHA else 'DESLIGADA (defina APP_PASSWORD antes de publicar)'}")
+    print(f"Senhas: {', '.join(SENHAS) if SENHA else 'DESLIGADAS (defina APP_PASSWORD antes de publicar)'}")
     print(f"IA {'ativada' if chave_api() else 'sem chave - veja .env.example'}")
     ThreadingHTTPServer((os.environ.get("HOST", "0.0.0.0"), PORT), Handler).serve_forever()
