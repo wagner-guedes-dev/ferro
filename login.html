@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Entrar - Ferro</title>
+<meta name="theme-color" content="#2A4BFF">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;600&family=Barlow+Condensed:wght@800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; background: #2a4bff; color: #fff; font: 16px/1.4 "Barlow", system-ui, sans-serif; padding: 24px; }
+  main { width: min(360px, 100%); }
+  img { width: 72px; height: 72px; border-radius: 20px; }
+  h1 { font: 800 2.6rem/1 "Barlow Condensed", sans-serif; text-transform: uppercase; margin: 18px 0 6px; }
+  p { margin: 0 0 22px; opacity: .85; }
+  input, button { width: 100%; padding: 15px; border-radius: 14px; border: 0; font: inherit; }
+  input { background: #fff; color: #0f1530; margin-bottom: 10px; }
+  button { background: #c6f432; color: #11230a; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .6; }
+  #erro { min-height: 1.4em; margin: 10px 0 0; color: #ffd2cd; font-weight: 600; }
+  :focus-visible { outline: 3px solid #19b6f2; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main>
+  <img src="icon.svg" alt="">
+  <h1>Ferro</h1>
+  <p>Digite sua senha para ver seu treino.</p>
+  <form id="f">
+    <input id="s" type="password" placeholder="Senha" autocomplete="current-password" required aria-label="Senha">
+    <button id="b">Entrar</button>
+    <p id="erro" role="alert"></p>
+  </form>
+</main>
+<script>
+  document.getElementById("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const b = document.getElementById("b"), erro = document.getElementById("erro");
+    b.disabled = true; erro.textContent = "";
+    try {
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ senha: document.getElementById("s").value }) });
+      if (r.ok) { location.href = "/"; return; }
+      erro.textContent = "Senha incorreta. Tente de novo.";
+    } catch { erro.textContent = "Sem conexão. Verifique a internet."; }
+    b.disabled = false;
+  });
+</script>
+</body>
+</html>
