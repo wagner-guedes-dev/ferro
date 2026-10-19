@@ -15,7 +15,6 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 PORT = int(os.environ.get("PORT", 5500))
 MODELO = os.environ.get("CLAUDE_MODEL", "claude-haiku-5-5")
 RAIZ = os.path.dirname(os.path.abspath(__file__))
-ARQUIVO_DADOS = os.path.join(RAIZ, "data", "dados.json")
 PRIVADOS = {".env", ".env.example", "server.py", "launch.json", "render.yaml", ".gitignore", "requirements.txt"}
 PUBLICOS = {"/login.html", "/manifest.webmanifest", "/icon.svg"}
 
@@ -42,12 +41,25 @@ SENHA = ler_env("APP_PASSWORD")
 TOKEN = hmac.new(SENHA.encode(), b"ferro-sessao", hashlib.sha256).hexdigest() if SENHA else ""
 
 
-SISTEMA = """Você é o coach pessoal (personal trainer + nutricionista esportivo) do Wagner, em português do Brasil.
-Perfil: 1,66 m, 66 kg, objetivo ganhar massa muscular. Treina de segunda a sexta (costas+bíceps, peito+tríceps, perna+ombro, e repete costas/peito); perna só na quarta; sábado e domingo descansa. Volta da academia a pé (~4 km). Rotina fixa: acorda 05:30, treina às 06:30 (cerca de 1h), dorme 21:30 (8h de sono); refeições: pré-treino 05:50, café pós-treino 07:45, lanche 10:30, almoço 12:30, lanche 16:00, jantar 19:00, ceia 20:45. Meta: ~2700 kcal, ~150 g de proteína, 2,5 L de água.
-Responda de forma curta, prática e amigável, com listas quando ajudar. Dê trocas de alimentos com quantidades. Ao analisar progresso, use os dados fornecidos e seja honesto. Não faça diagnóstico médico; em caso de dor, lesão ou condição de saúde, recomende um profissional.
+# Perfil do site: "ele" ou "ela" (variável APP_PERFIL). Define o plano carregado e a persona da IA.
+PERFIL = ler_env("APP_PERFIL") or "ele"
+if PERFIL not in ("ele", "ela"):
+    PERFIL = "ele"
+
+ESTILO = """Responda de forma curta, prática e amigável, com listas quando ajudar. Dê trocas de alimentos com quantidades. Ao analisar progresso, use os dados fornecidos e seja honesto. Não faça diagnóstico médico; em caso de dor, lesão ou condição de saúde, recomende um profissional.
 
 Dados atuais do app:
 """
+SISTEMAS = {
+    "ele": """Você é o coach pessoal (personal trainer + nutricionista esportivo) do Wagner, em português do Brasil.
+Perfil: 1,66 m, 66 kg, objetivo ganhar massa muscular. Treina de segunda a sexta (costas+bíceps, peito+tríceps, perna+ombro, e repete costas/peito); perna só na quarta; sábado e domingo descansa. Volta da academia a pé (~4 km). Rotina fixa: acorda 05:30, treina às 06:30 (cerca de 1h), dorme 21:30 (8h de sono); refeições: pré-treino 05:50, café pós-treino 07:45, lanche 10:30, almoço 12:30, lanche 16:00, jantar 19:00, ceia 20:45. Meta: ~2700 kcal, ~150 g de proteína, 2,5 L de água.
+""",
+    "ela": """Você é a coach pessoal (personal trainer + nutricionista esportiva) da usuária, em português do Brasil.
+Perfil: mulher, 1,64 m, 60 kg, objetivo ganhar massa magra com ênfase em glúteos e pernas. Treina de segunda a sexta (glúteo+posterior, costas+bíceps, quadríceps+panturrilha, peito+ombro+tríceps, glúteo+perna completa); sábado e domingo descansa. Rotina: acorda 05:30, treina às 06:30, dorme 21:30; refeições: pré-treino 05:50, café pós-treino 07:45, lanche 10:30, almoço 12:30, lanche 16:00, jantar 19:00, ceia 20:45. Meta: ~2200 kcal, ~120 g de proteína, 2,3 L de água.
+""",
+}
+SISTEMA = SISTEMAS[PERFIL] + ESTILO
+ARQUIVO_DADOS = os.path.join(RAIZ, "data", f"dados-{PERFIL}.json")
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -87,7 +99,16 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json(200, json.load(f))
             except (OSError, ValueError):
                 return self._json(200, {"ts": 0, "dados": {}})
-        if nome in PRIVADOS or "/." in caminho or caminho.startswith("/data/"):
+        if caminho == "/perfil.js":
+            with open(os.path.join(RAIZ, f"perfil-{PERFIL}.js"), "rb") as f:
+                corpo = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            return self.wfile.write(corpo)
+        if nome in PRIVADOS or nome.startswith("perfil-") or "/." in caminho or caminho.startswith("/data/"):
             return self.send_error(404)
         super().do_GET()
 
@@ -176,6 +197,7 @@ if __name__ == "__main__":
         ip = "IP-DO-PC"
     print(f"No PC:      http://localhost:{PORT}")
     print(f"No celular: http://{ip}:{PORT}  (mesmo Wi-Fi do PC)")
+    print(f"Perfil: {PERFIL}")
     print(f"Senha: {'ativada' if SENHA else 'DESLIGADA (defina APP_PASSWORD antes de publicar)'}")
     print(f"IA {'ativada' if chave_api() else 'sem chave - veja .env.example'}")
     ThreadingHTTPServer((os.environ.get("HOST", "0.0.0.0"), PORT), Handler).serve_forever()

@@ -1,5 +1,5 @@
 // Cache simples para o app abrir rápido e funcionar sem internet (exceto a IA).
-const CACHE = "ferro-v3";
+const CACHE = "ferro-v4";
 self.addEventListener("install", (e) => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));

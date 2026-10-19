@@ -198,6 +198,26 @@ h1, h2, h3, p { margin: 0; }
 .tabbar svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .tabbar .ativa { background: var(--blue); color: #fff; }
 
+/* troca de exercício */
+.trocar { padding: 5px 11px; border-radius: 99px; background: var(--bg); color: var(--ink); font-size: .82rem; font-weight: 600; }
+.tag-troca { display: inline-block; vertical-align: middle; padding: 1px 8px; border-radius: 99px; background: var(--lime); color: #11230a; font-size: .68rem; font-weight: 600; margin-left: 4px; }
+.sheet { position: fixed; inset: 0; z-index: 40; display: flex; align-items: flex-end; justify-content: center; }
+.sheet[hidden] { display: none; }
+.sheet-fundo { position: absolute; inset: 0; background: rgba(8, 11, 28, .6); }
+.sheet-box { position: relative; width: min(560px, 100%); max-height: 82dvh; display: flex; flex-direction: column; background: var(--surface); border-radius: 26px 26px 0 0; padding: 18px 16px calc(16px + env(safe-area-inset-bottom)); animation: sobe .25s ease-out; }
+@keyframes sobe { from { transform: translateY(40px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sheet-box { animation: none; } }
+.sheet-topo { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+.sheet-topo h3 { margin: 0; font: 800 1.5rem/1 "Barlow Condensed", sans-serif; text-transform: uppercase; }
+.sheet-topo .x { width: 38px; height: 38px; border-radius: 50%; background: var(--bg); font-size: 1rem; }
+.sheet-lista { overflow-y: auto; display: grid; gap: 6px; padding-bottom: 4px; }
+.alt { display: grid; grid-template-columns: 56px 1fr 28px; gap: 12px; align-items: center; padding: 8px; border-radius: 16px; text-align: left; background: var(--bg); }
+.alt.sel { box-shadow: inset 0 0 0 2px var(--blue); }
+.alt .thumb.p { width: 56px; height: 56px; border-radius: 12px; }
+.alt-n { font-weight: 600; line-height: 1.2; }
+.alt-n small { display: block; color: var(--mut); font-weight: 400; font-size: .78rem; }
+.alt-ok { color: var(--blue); font-weight: 800; font-size: 1.2rem; }
+
 /* toast e confete */
 .toast {
   position: fixed; left: 50%; bottom: calc(var(--nav-h) + 28px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px);

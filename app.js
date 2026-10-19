@@ -1,5 +1,4 @@
 const $ = (s) => document.querySelector(s);
-const NOME = "Wagner";
 const hojeDow = new Date().getDay();
 let dia = hojeDow;
 let aba = "hoje";
@@ -50,7 +49,7 @@ async function receberServidor() {
   } catch {}
 }
 
-const vazio = () => ({ ex: {}, ref: {}, comi: {}, agua: 0 });
+const vazio = () => ({ ex: {}, ref: {}, comi: {}, agua: 0, troca: {} });
 const estadoKey = (key) => ler("dia:" + key, vazio());
 const estado = (dow) => estadoKey(chaveDoDia(dow));
 const salvar = (dow, e) => gravar("dia:" + chaveDoDia(dow), e);
@@ -231,7 +230,8 @@ function viewTreino() {
   const key = chaveDoDia(dia), e = estado(dia);
   const cargas = ler("cargas", {});
   const feitos = t.exercicios.filter((_, i) => e.ex[i]).length;
-  const lista = t.exercicios.map((x, i) => {
+  const lista = t.exercicios.map((orig, i) => {
+    const x = exEfetivo(orig, (e.troca || {})[i]);
     const yt = "https://www.youtube.com/results?search_query=" + encodeURIComponent("como fazer " + x.n + " execução correta");
     const hist = cargas[x.n] || {};
     const anteriores = Object.keys(hist).filter((k) => k < key).sort();
@@ -241,9 +241,10 @@ function viewTreino() {
       <a class="thumb" href="${yt}" target="_blank" rel="noopener" aria-label="Ver vídeo de ${x.n}">
         <span class="anim"><img src="img/${x.img}_0.jpg" alt="" loading="lazy"><img src="img/${x.img}_1.jpg" alt="" loading="lazy"></span></a>
       <div class="ex-txt">
-        <div class="nome">${x.n}</div>
-        <div class="info">${x.s}${x.d ? " · descanso " + x.d : ""}</div>
+        <div class="nome">${x.n}${x.trocado ? ` <span class="tag-troca">trocado</span>` : ""}</div>
+        <div class="info">${GRUPOS[CATALOGO[x.img].g]} · ${x.s}${x.d ? " · descanso " + x.d : ""}</div>
         <div class="acoes">
+          <button class="trocar" data-trocar="${i}">⇄ Trocar</button>
           <label class="carga"><input type="number" inputmode="decimal" step="0.5" min="0" placeholder="${ultima ? ultima : "kg"}" value="${hist[key] ?? ""}" data-carga="${i}" aria-label="Carga usada em ${x.n}"> kg${ultima ? ` · última ${ultima}` : ""}</label>
           <a class="video" href="${yt}" target="_blank" rel="noopener">▶ Vídeo</a>
         </div>
@@ -251,7 +252,7 @@ function viewTreino() {
       <input class="check" type="checkbox" data-ex="${i}" ${e.ex[i] ? "checked" : ""} aria-label="Concluir ${x.n}">
     </div>`;
   }).join("");
-  const caminhada = t.semCaminhada ? "" : `
+  const caminhada = t.semCaminhada || !CAMINHADA ? "" : `
     <label class="card item ${e.ex.walk ? "feito" : ""}">
       <input class="check" type="checkbox" data-ex="walk" ${e.ex.walk ? "checked" : ""}>
       <div><div class="nome" style="font-weight:600">🚶 ${CAMINHADA.texto}</div><div class="mut">${CAMINHADA.info}</div></div>
@@ -349,7 +350,7 @@ function viewEvolucao() {
   ];
   return `
     <h2 class="titulo">Minha evolução</h2>
-    <p class="mut" style="margin:6px 0 12px">Pese-se em jejum, sempre no mesmo dia da semana. Meta realista: ganhar de 0,25 a 0,5 kg por semana.</p>
+    <p class="mut" style="margin:6px 0 12px">Pese-se em jejum, sempre no mesmo dia da semana. Meta realista: ganhar de ${METAPESO} por semana.</p>
     <div class="kpis">
       <div class="card kpi"><b>${br(atual)} kg</b><span>peso atual</span></div>
       <div class="card kpi"><b>${dif > 0 ? "+" : ""}${br(dif)} kg</b><span>desde o início · IMC ${br(imc)}</span></div>
@@ -385,7 +386,7 @@ function viewCoach() {
     <h2 class="titulo">Coach IA</h2>
     <p class="mut" style="margin:6px 0 12px">Pergunte sobre treino, dieta ou evolução. Ele conhece seu plano e seus registros.</p>
     <div class="chat" id="chat">
-      ${chat.length === 0 ? `<div class="msg ia">Oi, ${NOME}! Posso explicar exercícios, trocar alimentos, ajustar a dieta e analisar sua evolução. O que você quer saber?</div>` : ""}
+      ${chat.length === 0 ? `<div class="msg ia">Oi${NOME ? ", " + NOME : ""}! Posso explicar exercícios, trocar alimentos, ajustar a dieta e analisar sua evolução. O que você quer saber?</div>` : ""}
       ${chat.map((m) => `<div class="msg ${m.role === "user" ? "eu" : "ia"}">${md(m.content)}</div>`).join("")}
       ${carregandoIA ? `<div class="msg ia">Pensando…</div>` : ""}
     </div>
@@ -421,7 +422,7 @@ const rolarChat = () => { const c = $("#chat"); if (c) c.scrollTop = c.scrollHei
 // ---------- render e eventos ----------
 function render() {
   const h = new Date().getHours();
-  $("#saudacao").textContent = `${h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"}, ${NOME}`;
+  $("#saudacao").textContent = `${h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"}${NOME ? ", " + NOME : ""}`;
   $("#data").textContent = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
   const st = estatisticas();
   $("#chip-streak").innerHTML = `🔥 ${st.atual}<small>${st.atual === 1 ? "treino seguido" : "treinos seguidos"}</small>`;
@@ -432,12 +433,41 @@ function render() {
   if (aba === "coach") rolarChat();
   scrollTo(0, antes);
 }
+// ----- troca de exercício (janela inferior) -----
+let trocaIdx = null;
+function desenharSheet() {
+  const box = $("#sheet");
+  if (trocaIdx === null) { box.hidden = true; box.innerHTML = ""; return; }
+  const orig = TREINOS[SEMANA[dia].treino].exercicios[trocaIdx];
+  const e = estado(dia), atual = (e.troca || {})[trocaIdx] || orig.img;
+  const itens = alternativas(orig).sort((a, b) => (a.id === orig.img ? -1 : b.id === orig.img ? 1 : a.n.localeCompare(b.n, "pt")));
+  box.hidden = false;
+  box.innerHTML = `<div class="sheet-fundo" data-fechar></div>
+    <div class="sheet-box" role="dialog" aria-label="Trocar exercício">
+      <div class="sheet-topo"><div><h3>Trocar exercício</h3><p class="mut">${GRUPOS[CATALOGO[orig.img].g]} · mantém ${orig.s}</p></div><button class="x" data-fechar aria-label="Fechar">✕</button></div>
+      <div class="sheet-lista">${itens.map((o) => `
+        <button class="alt ${o.id === atual ? "sel" : ""}" data-escolher="${o.id}">
+          <span class="thumb p"><span class="anim"><img src="img/${o.id}_0.jpg" alt="" loading="lazy"><img src="img/${o.id}_1.jpg" alt="" loading="lazy"></span></span>
+          <span class="alt-n">${o.n}${o.id === orig.img ? `<small>exercício original</small>` : ""}</span>
+          <span class="alt-ok">${o.id === atual ? "✓" : ""}</span>
+        </button>`).join("")}</div></div>`;
+}
+
 function ir(nova) { aba = nova; render(); scrollTo(0, 0); }
 
 document.addEventListener("click", (ev) => {
-  const t = ev.target.closest("button");
+  const t = ev.target.closest("button, [data-fechar]");
   if (!t) return;
   const d = t.dataset;
+  if (d.fechar !== undefined) { trocaIdx = null; desenharSheet(); return; }
+  if (d.escolher) {
+    const orig = TREINOS[SEMANA[dia].treino].exercicios[trocaIdx], e = estado(dia);
+    e.troca = e.troca || {};
+    if (d.escolher === orig.img) delete e.troca[trocaIdx]; else e.troca[trocaIdx] = d.escolher;
+    salvar(dia, e); trocaIdx = null; desenharSheet(); render();
+    toast(d.escolher === orig.img ? "Voltou ao exercício original" : "Exercício trocado"); return;
+  }
+  if (d.trocar !== undefined) { trocaIdx = +d.trocar; desenharSheet(); return; }
   if (d.dia !== undefined) { dia = +d.dia; render(); }
   else if (d.aba) { if (d.aba === "treino" || d.aba === "dieta") dia = hojeDow; ir(d.aba); }
   else if (d.irTreino !== undefined) { dia = hojeDow; ir("treino"); }
@@ -461,7 +491,7 @@ document.addEventListener("click", (ev) => {
 document.addEventListener("change", (ev) => {
   const i = ev.target;
   if (i.dataset.carga !== undefined) {
-    const x = TREINOS[SEMANA[dia].treino].exercicios[+i.dataset.carga];
+    const x = exEfetivo(TREINOS[SEMANA[dia].treino].exercicios[+i.dataset.carga], (estado(dia).troca || {})[+i.dataset.carga]);
     const c = ler("cargas", {}); c[x.n] = c[x.n] || {};
     const v = parseFloat(i.value);
     if (v > 0) c[x.n][chaveDoDia(dia)] = v; else delete c[x.n][chaveDoDia(dia)];
