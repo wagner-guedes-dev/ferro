@@ -66,6 +66,51 @@ Perfil: mulher, 1,64 m, 60 kg, objetivo ganhar massa magra com ênfase em glúte
 
 
 
+# ---- Armazenamento dos dados do usuário ----
+# Com UPSTASH_REDIS_REST_URL/TOKEN os dados ficam num banco gratuito externo (sobrevivem a reinícios
+# do servidor). Sem eles, usa arquivo local em data/ (suficiente para uso no próprio PC).
+BANCO_URL = ler_env("UPSTASH_REDIS_REST_URL").rstrip("/")
+BANCO_TOKEN = ler_env("UPSTASH_REDIS_REST_TOKEN")
+
+
+def _banco(caminho, corpo=None):
+    req = urllib.request.Request(f"{BANCO_URL}/{caminho}", data=corpo, method="POST" if corpo is not None else "GET",
+                                 headers={"Authorization": f"Bearer {BANCO_TOKEN}"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)
+
+
+def carregar_dados(perfil):
+    """Devolve {"ts":..., "dados":{...}}. Levanta OSError se o armazenamento estiver indisponível."""
+    if BANCO_URL:
+        try:
+            r = _banco(f"get/ferro-dados-{perfil}").get("result")
+            return json.loads(r) if r else {"ts": 0, "dados": {}}
+        except (urllib.error.URLError, ValueError, TimeoutError) as e:
+            raise OSError(str(e))
+    try:
+        with open(os.path.join(RAIZ, "data", f"dados-{perfil}.json"), encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"ts": 0, "dados": {}}
+    except ValueError:
+        return {"ts": 0, "dados": {}}
+
+
+def salvar_dados(perfil, obj):
+    texto = json.dumps(obj, ensure_ascii=False)
+    if BANCO_URL:
+        try:
+            _banco(f"set/ferro-dados-{perfil}", texto.encode("utf-8"))
+        except (urllib.error.URLError, ValueError, TimeoutError) as e:
+            raise OSError(str(e))
+        return
+    pasta = os.path.join(RAIZ, "data")
+    os.makedirs(pasta, exist_ok=True)
+    with open(os.path.join(pasta, f"dados-{perfil}.json"), "w", encoding="utf-8") as f:
+        f.write(texto)
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=RAIZ, **kw)
@@ -93,9 +138,6 @@ class Handler(SimpleHTTPRequestHandler):
     def autenticado(self):
         return self.perfil_sessao() is not None
 
-    def arquivo_dados(self):
-        return os.path.join(RAIZ, "data", f"dados-{self.perfil_sessao() or PERFIL}.json")
-
     def do_GET(self):
         caminho = self.path.split("?")[0]
         nome = os.path.basename(caminho)
@@ -108,10 +150,9 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if caminho == "/api/dados":
             try:
-                with open(self.arquivo_dados(), encoding="utf-8") as f:
-                    return self._json(200, json.load(f))
-            except (OSError, ValueError):
-                return self._json(200, {"ts": 0, "dados": {}})
+                return self._json(200, carregar_dados(self.perfil_sessao() or PERFIL))
+            except OSError:
+                return self._json(502, {"erro": "Armazenamento indisponível."})
         if caminho == "/perfil.js":
             with open(os.path.join(RAIZ, f"perfil-{self.perfil_sessao() or PERFIL}.js"), "rb") as f:
                 corpo = f.read()
@@ -152,17 +193,21 @@ class Handler(SimpleHTTPRequestHandler):
         if self.path != "/api/dados":
             return self.send_error(404)
         n = int(self.headers.get("Content-Length", 0))
-        if n > 5_000_000:
+        if n > 900_000:
             return self._json(413, {"erro": "Dados grandes demais."})
         try:
             dados = json.loads(self.rfile.read(n))
             assert isinstance(dados.get("dados"), dict)
         except (ValueError, AssertionError, AttributeError):
             return self._json(400, {"erro": "Dados inválidos."})
-        arq = self.arquivo_dados()
-        os.makedirs(os.path.dirname(arq), exist_ok=True)
-        with open(arq, "w", encoding="utf-8") as f:
-            json.dump(dados, f, ensure_ascii=False)
+        perfil = self.perfil_sessao() or PERFIL
+        try:
+            atual = carregar_dados(perfil)
+            if atual.get("ts", 0) > dados.get("ts", 0):
+                return self._json(409, {"erro": "Há dados mais novos no servidor."})
+            salvar_dados(perfil, dados)
+        except OSError:
+            return self._json(502, {"erro": "Armazenamento indisponível."})
         self._json(200, {"ok": True})
 
     def do_POST(self):
@@ -214,6 +259,7 @@ if __name__ == "__main__":
         ip = "IP-DO-PC"
     print(f"No PC:      http://localhost:{PORT}")
     print(f"No celular: http://{ip}:{PORT}  (mesmo Wi-Fi do PC)")
+    print(f"Dados: {'banco externo (Upstash)' if BANCO_URL else 'arquivo local em data/ (some se o servidor reiniciar na nuvem)'}")
     print(f"Perfil: {PERFIL}")
     print(f"Senhas: {', '.join(SENHAS) if SENHA else 'DESLIGADAS (defina APP_PASSWORD antes de publicar)'}")
     print(f"IA {'ativada' if chave_api() else 'sem chave - veja .env.example'}")

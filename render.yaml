@@ -10,3 +10,9 @@ services:
         sync: false   # você digita no painel do Render
       - key: ANTHROPIC_API_KEY
         sync: false   # opcional: só para o Coach IA
+      - key: APP_PASSWORD_ELA
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false   # banco gratuito onde os dados ficam salvos (ver passo a passo)
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false

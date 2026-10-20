@@ -33,8 +33,16 @@ function snapshot() {
   return { ts: Number(localStorage.getItem("_ts") || 0), dados };
 }
 async function enviarServidor() {
-  try { await fetch("/api/dados", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot()) }); } catch {}
+  try {
+    const r = await fetch("/api/dados", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot()), keepalive: true });
+    if (r.status === 409) receberServidor(); // o servidor tem algo mais novo (ex.: outro aparelho)
+  } catch {}
 }
+// Garante que nada se perde ao fechar/trocar de app, e puxa o que foi salvo em outro aparelho ao voltar.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { clearTimeout(timerSync); enviarServidor(); }
+  else receberServidor();
+});
 async function receberServidor() {
   try {
     const r = await fetch("/api/dados");
