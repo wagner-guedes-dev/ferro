@@ -228,3 +228,53 @@ h1, h2, h3, p { margin: 0; }
 #confete { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; }
 .vazio { text-align: center; padding: 26px 10px; color: var(--mut); }
 .vazio .grande { font-size: 2.4rem; }
+
+/* telas estreitas (celulares pequenos) */
+@media (max-width: 360px) {
+  body { padding-left: 12px; padding-right: 12px; }
+  .saudacao { font-size: 1.4rem; }
+  .hero { grid-template-columns: 112px 1fr; padding: 14px; gap: 12px; }
+  .aneis { width: 112px; height: 112px; }
+  .centro b { font-size: 1.9rem; }
+  .ex { grid-template-columns: 60px 1fr auto; gap: 10px; }
+  .thumb { width: 60px; height: 60px; }
+  .tabbar span { font-size: .66rem; }
+  .form { grid-template-columns: 1fr; }
+}
+
+/* modo relógio: tela pequena e quadrada, uma informação por vez. Tudo em vmin para escalar com a tela. */
+body.relogio { background: #000; color: #fff; max-width: none; padding: 0; height: 100dvh; overflow: hidden; }
+body.relogio .topo, body.relogio .tabbar { display: none; }
+body.relogio #conteudo { height: 100dvh; }
+.rl { height: 100dvh; display: flex; flex-direction: column; padding: 3vmin 5vmin 1vmin; text-align: center; font-size: 5vmin; }
+.rl-corpo { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2.2vmin; overflow: hidden; }
+.rl small { color: #9aa3c7; font-size: 4.2vmin; line-height: 1.2; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+.rl b { font-family: "Barlow Condensed", sans-serif; text-transform: uppercase; font-weight: 800; line-height: 1; }
+.rl-hora { font: 800 24vmin/1 "Barlow Condensed", sans-serif; letter-spacing: .01em; }
+.rl-prox { display: grid; gap: 1vmin; justify-items: center; }
+.rl-emoji { font-size: 11vmin; line-height: 1; }
+.rl-prox b { font-size: 8.5vmin; }
+.rl-barra { width: 70%; height: 2.6vmin; background: #1b2240; border-radius: 99px; overflow: hidden; }
+.rl-barra div { height: 100%; background: #c6f432; border-radius: 99px; }
+.rl-leg { text-transform: none; }
+.rl-grande { font-size: 20vmin; line-height: 1; }
+.rl-tit { font-size: 11vmin; }
+.rl-nome { font-size: 7.4vmin; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.rl-foto { width: 25vmin; height: 25vmin; border-radius: 4vmin; flex: none; }
+.rl-btn { width: 92%; min-height: 15vmin; border-radius: 99px; background: #fff; color: #000; font-size: 6.2vmin; font-weight: 600; flex: none; }
+.rl-btn.ok { background: #c6f432; color: #11230a; }
+.rl-btn.agua { background: #19b6f2; color: #04202c; width: 100%; }
+.rl-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 2.4vmin; width: 100%; }
+.rl-anel { position: relative; width: 36vmin; height: 36vmin; flex: none; }
+.rl-anel svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.rl-anel circle { fill: none; stroke-width: 9; }
+.rl-anel .t { stroke: #1b2240; }
+.rl-anel .v { stroke: #19b6f2; stroke-linecap: round; transition: stroke-dashoffset .5s; }
+.rl-anel > div { position: absolute; inset: 0; display: grid; place-content: center; }
+.rl-anel b { font-size: 10vmin; }
+.rl-pontos { display: flex; justify-content: center; height: 10vmin; flex: none; }
+.rl-pontos button { width: 9vmin; height: 10vmin; position: relative; }
+.rl-pontos button::after { content: ""; position: absolute; inset: 3.2vmin; border-radius: 50%; background: #2b3358; }
+.rl-pontos .on::after { background: #c6f432; }
+body.relogio .toast { bottom: 12vmin; font-size: 4.5vmin; padding: 2vmin 4vmin; }
+body.relogio .sheet { display: none; }

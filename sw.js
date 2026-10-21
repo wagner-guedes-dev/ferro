@@ -1,6 +1,6 @@
 // Cache para o app abrir sem internet. Código (HTML/JS/CSS) vem da rede primeiro, para as
 // atualizações aparecerem na hora; as fotos dos exercícios ficam em cache para carregar rápido.
-const CACHE = "ferro-v6";
+const CACHE = "ferro-v7";
 self.addEventListener("install", () => { self.skipWaiting(); });
 self.addEventListener("activate", (e) => {
   e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));

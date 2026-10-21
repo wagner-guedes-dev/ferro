@@ -29,7 +29,7 @@ function gravar(k, v) {
 }
 function snapshot() {
   const dados = {};
-  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k !== "_ts") dados[k] = localStorage.getItem(k); }
+  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (!k.startsWith("_")) dados[k] = localStorage.getItem(k); }
   return { ts: Number(localStorage.getItem("_ts") || 0), dados };
 }
 async function enviarServidor() {
@@ -164,6 +164,15 @@ function chipsDias() {
 }
 
 // ---------- telas ----------
+function eventosDoDia(e, descanso, t) {
+  return [
+    { h: ROTINA.acordar, t: "Acordar", e: "⏰", sub: "Beba 500 ml de água" },
+    ...(descanso ? [] : [{ h: ROTINA.treino, t: "Treino", e: t.emoji, sub: t.nome, ir: true }]),
+    ...REFEICOES.map((x) => ({ h: x.hora, t: x.nome, e: x.emoji, sub: x.opcoes[e.ref[x.id] ?? 0].t, feito: !!e.comi[x.id] })),
+    { h: ROTINA.dormir, t: "Dormir", e: "🌙", sub: "8 horas de sono: é quando o músculo cresce" },
+  ].sort((a, b) => a.h.localeCompare(b.h));
+}
+
 function viewHoje() {
   const key = hojeKey();
   const r = resumoDia(key), e = estadoKey(key);
@@ -195,12 +204,7 @@ function viewHoje() {
         <div class="barra"><div style="width:${pTreino * 100}%;background:var(--blue)"></div></div>
         <p class="mut" style="margin:8px 0 12px">${r.feitos} de ${r.total} exercícios · ${t.exercicios.length ? "cerca de " + Math.round(t.exercicios.length * 7) + " min" : ""}</p>
         <button class="btn azul" data-ir-treino>${r.feitos === 0 ? "Começar treino" : r.feitos === r.total ? "Ver treino concluído" : "Continuar treino"}</button></div>`;
-  const eventos = [
-    { h: ROTINA.acordar, t: "Acordar", e: "⏰", sub: "Beba 500 ml de água" },
-    ...(descanso ? [] : [{ h: ROTINA.treino, t: "Treino", e: t.emoji, sub: t.nome, ir: true }]),
-    ...REFEICOES.map((x) => ({ h: x.hora, t: x.nome, e: x.emoji, sub: x.opcoes[e.ref[x.id] ?? 0].t, feito: !!e.comi[x.id] })),
-    { h: ROTINA.dormir, t: "Dormir", e: "🌙", sub: "8 horas de sono: é quando o músculo cresce" },
-  ].sort((a, b) => a.h.localeCompare(b.h));
+  const eventos = eventosDoDia(e, descanso, t);
   let agoraIdx = -1;
   eventos.forEach((ev, i) => { if (ev.h <= hhmm) agoraIdx = i; });
   const blocoDia = `<div class="card"><h3>Seu dia</h3><ol class="tempo">${eventos.map((ev, i) => `
@@ -230,7 +234,8 @@ function viewHoje() {
       <div class="linha" style="justify-content:space-between"><div class="grande">Nível ${nv.n} · ${nv.nome}</div><div class="mut">${st.xp} XP</div></div>
       <div class="barra"><div style="width:${nv.pct}%"></div></div>
       <p class="mut" style="margin-top:8px">${nv.max ? "Nível máximo. Respeito." : `Faltam ${nv.falta} XP para o próximo nível. Treino, refeições e água dão XP.`}</p>
-    </div>`;
+    </div>
+    <button class="btn fantasma" data-modo="relogio">⌚ Abrir modo relógio</button>`;
 }
 
 function viewTreino() {
@@ -427,8 +432,72 @@ async function enviarIA(texto) {
 }
 const rolarChat = () => { const c = $("#chat"); if (c) c.scrollTop = c.scrollHeight; };
 
+// ---------- modo relógio ----------
+// Liga sozinho em telas de relógio (pequenas ou quase quadradas) e pode ser forçado em "Abrir modo relógio".
+let relPag = 0;
+function modoRelogio() {
+  let m = null;
+  try { m = localStorage.getItem("_modo"); } catch {}
+  if (m === "relogio") return true;
+  if (m === "app") return false;
+  const w = innerWidth, h = innerHeight;
+  return w <= 320 || (Math.min(w, h) <= 420 && Math.abs(w - h) <= 70);
+}
+const RL_PAGINAS = ["agora", "treino", "refeicao", "agua", "mais"];
+function viewRelogio() {
+  const key = hojeKey(), e = estadoKey(key), r = resumoDia(key);
+  const t = TREINOS[SEMANA[hojeDow].treino], descanso = r.treino === null;
+  const ag = new Date(), hhmm = `${String(ag.getHours()).padStart(2, "0")}:${String(ag.getMinutes()).padStart(2, "0")}`;
+  const pag = RL_PAGINAS[relPag];
+  let corpo = "";
+  if (pag === "agora") {
+    const ev = eventosDoDia(e, descanso, t);
+    const prox = ev.find((x) => x.h >= hhmm && !x.feito) || ev[ev.length - 1];
+    const pTreino = descanso ? 1 : r.treino, pDieta = r.comidas / REFEICOES.length, pAgua = Math.min(1, r.agua);
+    const total = Math.round(((pTreino + pDieta + pAgua) / 3) * 100);
+    corpo = `<div class="rl-hora">${hhmm}</div>
+      <div class="rl-prox"><span class="rl-emoji">${prox.e}</span><b>${prox.t}</b><small>${prox.h} · ${prox.sub}</small></div>
+      <div class="rl-barra"><div style="width:${total}%"></div></div><small class="rl-leg">Dia ${total}%</small>`;
+  } else if (pag === "treino") {
+    if (descanso) corpo = `<div class="rl-grande">😴</div><b class="rl-tit">Descanso</b><small>Hoje não tem treino</small>`;
+    else {
+      const i = t.exercicios.findIndex((_, n) => !e.ex[n]);
+      if (i < 0) corpo = `<div class="rl-grande">🎉</div><b class="rl-tit">Treino feito!</b><small>${r.total} de ${r.total} exercícios</small>`;
+      else {
+        const x = exEfetivo(t.exercicios[i], (e.troca || {})[i]);
+        corpo = `<small class="rl-leg">Exercício ${i + 1} de ${r.total}</small>
+          <span class="thumb rl-foto"><span class="anim"><img src="img/${x.img}_0.jpg" alt=""><img src="img/${x.img}_1.jpg" alt=""></span></span>
+          <b class="rl-nome">${x.n}</b><small>${x.s}${x.d ? " · descanso " + x.d : ""}</small>
+          <button class="rl-btn ok" data-rl-feito="${i}">✓ Feito</button>`;
+      }
+    }
+  } else if (pag === "refeicao") {
+    const m = REFEICOES.find((x) => !e.comi[x.id] && x.hora >= hhmm) || REFEICOES.find((x) => !e.comi[x.id]);
+    if (!m) corpo = `<div class="rl-grande">✅</div><b class="rl-tit">Tudo comido</b><small>${r.kcal} kcal hoje</small>`;
+    else {
+      const o = m.opcoes[e.ref[m.id] ?? 0];
+      corpo = `<small class="rl-leg">${m.emoji} ${m.nome} · ${m.hora}</small><b class="rl-nome">${o.t}</b><small>${o.d}</small>
+        <button class="rl-btn ok" data-rl-comi="${m.id}">✓ Já comi</button>`;
+    }
+  } else if (pag === "agua") {
+    const p = Math.min(1, r.agua), c = 2 * Math.PI * 44;
+    corpo = `<div class="rl-anel"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="44" class="t"/><circle cx="50" cy="50" r="44" class="v" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - p)}"/></svg>
+        <div><b>${br(r.ml / 1000, 2)}</b><small>de ${br(META.agua / 1000)} L</small></div></div>
+      <div class="rl-duo"><button class="rl-btn agua" data-ml="250">+250</button><button class="rl-btn agua" data-ml="500">+500</button></div>`;
+  } else {
+    corpo = `<b class="rl-tit">Ferro</b><small>${r.feitos}/${r.total} exercícios · ${r.comidas}/${REFEICOES.length} refeições</small>
+      <button class="rl-btn" data-modo="app">📱 Abrir app completo</button>`;
+  }
+  const pontos = RL_PAGINAS.map((_, n) => `<button data-rl="${n}" class="${n === relPag ? "on" : ""}" aria-label="Tela ${n + 1}"></button>`).join("");
+  return `<div class="rl"><div class="rl-corpo">${corpo}</div><div class="rl-pontos">${pontos}</div></div>`;
+}
+function irRelPag(n) { relPag = (n + RL_PAGINAS.length) % RL_PAGINAS.length; render(); }
+
 // ---------- render e eventos ----------
 function render() {
+  const rel = modoRelogio();
+  document.body.classList.toggle("relogio", rel);
+  if (rel) { $("#conteudo").innerHTML = viewRelogio(); return; }
   const h = new Date().getHours();
   $("#saudacao").textContent = `${h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite"}${NOME ? ", " + NOME : ""}`;
   $("#data").textContent = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
@@ -467,6 +536,15 @@ document.addEventListener("click", (ev) => {
   const t = ev.target.closest("button, [data-fechar]");
   if (!t) return;
   const d = t.dataset;
+  if (d.modo) { try { localStorage.setItem("_modo", d.modo); } catch {} relPag = 0; render(); scrollTo(0, 0); return; }
+  if (d.rl !== undefined) { irRelPag(+d.rl); return; }
+  if (d.rlFeito !== undefined) {
+    const e = estadoKey(hojeKey()); e.ex[d.rlFeito] = true; gravar("dia:" + hojeKey(), e);
+    const t = TREINOS[SEMANA[hojeDow].treino];
+    if (t.exercicios.every((_, n) => e.ex[n])) { confete(); toast("Treino concluído! 💪"); }
+    render(); return;
+  }
+  if (d.rlComi) { const e = estadoKey(hojeKey()); e.comi[d.rlComi] = true; gravar("dia:" + hojeKey(), e); toast("Registrado"); render(); return; }
   if (d.fechar !== undefined) { trocaIdx = null; desenharSheet(); return; }
   if (d.escolher) {
     const orig = TREINOS[SEMANA[dia].treino].exercicios[trocaIdx], e = estado(dia);
@@ -531,6 +609,21 @@ document.addEventListener("submit", (ev) => {
     const q = f.q.value; f.q.value = ""; enviarIA(q);
   }
 });
+
+// No relógio: arrastar para o lado ou girar a coroa/rolar muda de tela.
+let toqueX = null, rodaEm = 0;
+document.addEventListener("touchstart", (ev) => { toqueX = ev.touches[0].clientX; }, { passive: true });
+document.addEventListener("touchend", (ev) => {
+  if (toqueX === null || !document.body.classList.contains("relogio")) return;
+  const dx = ev.changedTouches[0].clientX - toqueX; toqueX = null;
+  if (Math.abs(dx) > 45) irRelPag(relPag + (dx < 0 ? 1 : -1));
+}, { passive: true });
+document.addEventListener("wheel", (ev) => {
+  if (!document.body.classList.contains("relogio") || Date.now() - rodaEm < 350 || Math.abs(ev.deltaY) < 8) return;
+  rodaEm = Date.now(); irRelPag(relPag + (ev.deltaY > 0 ? 1 : -1));
+}, { passive: true });
+addEventListener("resize", () => { if (document.body.classList.contains("relogio") !== modoRelogio()) render(); });
+setInterval(() => { if (document.body.classList.contains("relogio") && document.visibilityState === "visible") render(); }, 30000);
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 render();
