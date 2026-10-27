@@ -1,0 +1,57 @@
+name: DroidDesk — build installers
+
+on:
+  push:
+    tags: ['droiddesk-v*']
+    paths: ['droiddesk/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            cmd: dist:win
+          - os: macos-latest
+            cmd: dist:mac
+          - os: ubuntu-latest
+            cmd: dist:linux
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: droiddesk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: droiddesk/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run ${{ matrix.cmd }} -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: droiddesk-${{ matrix.os }}
+          path: |
+            droiddesk/dist/*.exe
+            droiddesk/dist/*.dmg
+            droiddesk/dist/*.AppImage
+            droiddesk/dist/*.deb
+          if-no-files-found: error
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/droiddesk-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            droiddesk/dist/*.exe
+            droiddesk/dist/*.dmg
+            droiddesk/dist/*.AppImage
+            droiddesk/dist/*.deb

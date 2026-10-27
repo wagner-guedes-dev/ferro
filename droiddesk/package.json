@@ -1,0 +1,29 @@
+{
+  "name": "droiddesk",
+  "productName": "DroidDesk",
+  "version": "1.0.0",
+  "description": "Gerenciador de perfis de emulador Android com proxy, estilo GeeLark/AdsPower",
+  "author": "Wagner Guedes",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/wagner-guedes-dev/ferro.git" },
+  "homepage": "https://github.com/wagner-guedes-dev/ferro/tree/main/droiddesk",
+  "main": "src/main/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/run.js",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "flag-icons": "^7.6.0",
+    "socks": "^2.8.10"
+  },
+  "devDependencies": {
+    "electron": "45.1.0",
+    "electron-builder": "^26.0.0"
+  }
+}
