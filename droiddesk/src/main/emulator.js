@@ -92,6 +92,10 @@ class EmulatorManager extends EventEmitter {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       inst.child = child;
+      if (inst.status === 'stopped') { // stop() was called while the bridge was starting
+        killTree(child);
+        return { port: profile.port, bridgePort: null };
+      }
       const onOut = (chunk) => {
         for (const line of String(chunk).split(/\r?\n/)) if (line.trim()) this._log(inst, line.trim());
       };

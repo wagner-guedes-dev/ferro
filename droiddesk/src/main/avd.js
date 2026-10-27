@@ -108,8 +108,9 @@ function updateDisplayName(avdId, displayName, home) {
 
 function deleteAvd(avdId, home) {
   const h = avdHome(home);
-  fs.rmSync(path.join(h, `${avdId}.avd`), { recursive: true, force: true });
-  fs.rmSync(path.join(h, `${avdId}.ini`), { force: true });
+  // The emulator may still hold file locks for a moment after exiting (Windows).
+  fs.rmSync(path.join(h, `${avdId}.avd`), { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+  fs.rmSync(path.join(h, `${avdId}.ini`), { force: true, maxRetries: 10, retryDelay: 300 });
 }
 
 function avdExists(avdId, home) {
