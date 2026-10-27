@@ -127,7 +127,7 @@ handle('app:info', () => ({
 handle('settings:get', () => store.settings);
 handle('settings:set', (patch) => {
   const allowed = {};
-  for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode', 'javaHome']) if (k in patch) allowed[k] = patch[k];
   const s = store.setSettings(allowed);
   refreshSdk();
   return s;
@@ -155,7 +155,7 @@ handle('meta:all', () => ({ devices: meta.DEVICES, countries: meta.COUNTRIES, ve
 
 // ---------- sdk ----------
 handle('sdk:status', () => refreshSdk());
-handle('sdk:java', () => sdk.findJava());
+handle('sdk:java', () => sdk.findJava(store.settings.javaHome));
 let installing = false;
 handle('sdk:install', async (opts) => {
   if (installing) throw new Error('INSTALL_RUNNING');
@@ -163,7 +163,7 @@ handle('sdk:install', async (opts) => {
   try {
     const target = opts.sdkPath || store.settings.sdkPath || sdkStatus.sdkPath || sdk.defaultSdkInstallPath();
     const log = (line) => send('sdk:log', line);
-    const status = await sdk.install({ sdkPath: target, api: opts.api, tag: opts.tag, abi: opts.abi }, log);
+    const status = await sdk.install({ sdkPath: target, api: opts.api, tag: opts.tag, abi: opts.abi, javaHome: store.settings.javaHome }, log);
     store.setSettings({ sdkPath: target });
     refreshSdk();
     return status;

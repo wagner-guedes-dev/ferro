@@ -565,8 +565,12 @@
     $('#st-install', root).onclick = () => runInstall($('#st-api', root).value, $('#st-tag', root).value);
     const java = await call(api.sdk.java(), { silent: true }).catch(() => null);
     const jv = $('#st-java', root); if (!jv) return;
-    jv.innerHTML = java ? yesno(true, `${t('found')} · ${java.version}`) : `${yesno(false, t('not_found'))}<span style="font-size:12px;color:var(--text-2)">${esc(t('java_missing'))}</span><button class="btn outline sm" id="st-java-dl">${esc(t('java_download'))}</button>`;
+    jv.innerHTML = (java ? `${yesno(true, `${t('found')} · ${java.version}`)}<span style="font-size:12px;color:var(--text-3)">${esc(java.home || 'PATH')}</span>` : `${yesno(false, t('not_found'))}<span style="font-size:12px;color:var(--text-2)">${esc(t('java_missing'))}</span><button class="btn outline sm" id="st-java-dl">${esc(t('java_download'))}</button>`)
+      + `<div style="flex-basis:100%;display:flex;gap:8px;margin-top:6px"><input class="input" id="st-java-home" value="${esc(state.settings.javaHome || '')}" placeholder="${esc(t('java_home_ph'))}" style="flex:1"><button class="btn outline sm" id="st-java-browse">${esc(t('browse'))}</button><button class="btn primary sm" id="st-java-save">${esc(t('save_path'))}</button></div>`;
+    jv.style.flexWrap = 'wrap';
     const dl = $('#st-java-dl', root); if (dl) dl.onclick = () => api.shell.openExternal('https://adoptium.net/temurin/releases/?version=17');
+    $('#st-java-browse', root).onclick = async () => { const p = await call(api.dialog.pickFolder(t('java_home_ph'))); if (p) $('#st-java-home', root).value = p; };
+    $('#st-java-save', root).onclick = async () => { state.settings = await call(api.settings.set({ javaHome: $('#st-java-home', root).value.trim() })); toast(t('toast_saved'), 'ok'); renderSettings(); };
   }
   async function runInstall(apiLevel, tag) {
     if (state.installing) return;

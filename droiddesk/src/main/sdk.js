@@ -118,21 +118,66 @@ function getStatus(settingsPath) {
   };
 }
 
-function findJava() {
+function listDirs(dir) {
+  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(dir, d.name)); } catch (_) { return []; }
+}
+
+// Well-known JDK install locations, newest-looking folder first.
+function knownJavaHomes() {
+  const homes = [];
+  const home = os.homedir();
+  if (IS_WIN) {
+    const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432, 'C:\\Program Files', 'C:\\Program Files (x86)', process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')].filter(Boolean);
+    for (const root of [...new Set(roots)]) {
+      for (const vendor of ['Eclipse Adoptium', 'Eclipse Foundation', 'Java', 'Microsoft', 'Zulu', 'Amazon Corretto', 'BellSoft', 'AdoptOpenJDK', 'OpenJDK', 'Temurin', 'Oracle', 'JetBrains']) {
+        homes.push(...listDirs(path.join(root, vendor)));
+      }
+      homes.push(path.join(root, 'Android', 'Android Studio', 'jbr'));
+      homes.push(path.join(root, 'Android', 'Android Studio', 'jre'));
+    }
+    homes.push(...listDirs(path.join(home, '.jdks')));
+    homes.push(...listDirs(path.join(home, 'scoop', 'apps')).flatMap((d) => listDirs(d)));
+  } else if (IS_MAC) {
+    homes.push(...listDirs('/Library/Java/JavaVirtualMachines').map((d) => path.join(d, 'Contents', 'Home')));
+    homes.push(...listDirs(path.join(home, 'Library', 'Java', 'JavaVirtualMachines')).map((d) => path.join(d, 'Contents', 'Home')));
+    homes.push('/Applications/Android Studio.app/Contents/jbr/Contents/Home');
+    homes.push(...listDirs('/opt/homebrew/opt').filter((d) => /openjdk/.test(d)).map((d) => path.join(d, 'libexec', 'openjdk.jdk', 'Contents', 'Home')));
+  } else {
+    homes.push(...listDirs('/usr/lib/jvm'));
+    homes.push(...listDirs('/opt').filter((d) => /jdk|java/i.test(d)));
+    homes.push(...listDirs(path.join(home, '.jdks')));
+    homes.push(...listDirs(path.join(home, '.sdkman', 'candidates', 'java')));
+    homes.push(path.join(home, 'android-studio', 'jbr'), '/opt/android-studio/jbr');
+  }
+  return [...new Set(homes)].filter((h) => fs.existsSync(path.join(h, 'bin', exe('java')))).sort().reverse();
+}
+
+function javaVersion(bin) {
   return new Promise((resolve) => {
-    const candidates = [];
-    if (process.env.JAVA_HOME) candidates.push(path.join(process.env.JAVA_HOME, 'bin', exe('java')));
-    candidates.push('java');
-    const tryNext = (i) => {
-      if (i >= candidates.length) return resolve(null);
-      execFile(candidates[i], ['-version'], { windowsHide: true }, (err, stdout, stderr) => {
-        if (err) return tryNext(i + 1);
-        const m = String(stderr || stdout).match(/version "([^"]+)"/);
-        resolve({ bin: candidates[i], version: m ? m[1] : 'unknown' });
-      });
-    };
-    tryNext(0);
+    execFile(bin, ['-version'], { windowsHide: true, timeout: 15000 }, (err, stdout, stderr) => {
+      if (err) return resolve(null);
+      const m = String(stderr || stdout).match(/version "([^"]+)"/);
+      resolve(m ? m[1] : 'unknown');
+    });
   });
+}
+
+/**
+ * Find a usable Java. Order: custom folder from settings, JAVA_HOME, PATH,
+ * then well-known install folders (works even if PATH was not updated).
+ */
+async function findJava(customHome) {
+  const candidates = [];
+  if (customHome) candidates.push({ home: customHome, bin: path.join(customHome, 'bin', exe('java')) });
+  if (process.env.JAVA_HOME) candidates.push({ home: process.env.JAVA_HOME, bin: path.join(process.env.JAVA_HOME, 'bin', exe('java')) });
+  candidates.push({ home: '', bin: 'java' });
+  for (const h of knownJavaHomes()) candidates.push({ home: h, bin: path.join(h, 'bin', exe('java')) });
+  for (const c of candidates) {
+    if (c.home && !fs.existsSync(c.bin)) continue;
+    const version = await javaVersion(c.bin);
+    if (version) return { bin: c.bin, home: c.home, version };
+  }
+  return null;
 }
 
 function download(url, dest, onProgress) {
@@ -194,9 +239,14 @@ async function ensureCmdlineTools(sdkPath, log) {
   return found;
 }
 
-function runSdkmanager(bin, sdkPath, args, log) {
+function runSdkmanager(bin, sdkPath, args, log, java) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env, ANDROID_HOME: sdkPath, ANDROID_SDK_ROOT: sdkPath };
+    if (java && java.home) {
+      env.JAVA_HOME = java.home;
+      env.PATH = `${path.join(java.home, 'bin')}${path.delimiter}${env.PATH || env.Path || ''}`;
+      if (IS_WIN) env.Path = env.PATH;
+    }
     const allArgs = [`--sdk_root=${sdkPath}`, ...args];
     // On Windows the .bat must run through cmd.exe, so quote every argument.
     const child = IS_WIN
@@ -221,19 +271,19 @@ function runSdkmanager(bin, sdkPath, args, log) {
 }
 
 // Full installer: command-line tools -> platform-tools + emulator + system image.
-async function install({ sdkPath, api = 34, tag = 'google_apis', abi }, log) {
+async function install({ sdkPath, api = 34, tag = 'google_apis', abi, javaHome }, log) {
   sdkPath = sdkPath || defaultSdkInstallPath();
-  const java = await findJava();
+  const java = await findJava(javaHome);
   if (!java) throw new Error('JAVA_MISSING');
-  log(`Java encontrado: ${java.version}`);
+  log(`Java encontrado: ${java.version} (${java.home || 'PATH'})`);
   log(`Pasta do SDK: ${sdkPath}`);
   const bin = await ensureCmdlineTools(sdkPath, log);
   const hostAbi = abi || (IS_MAC && process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64');
   const image = `system-images;android-${api};${tag};${hostAbi}`;
   log('Aceitando licenças...');
-  await runSdkmanager(bin, sdkPath, ['--licenses'], log).catch(() => { /* non fatal */ });
+  await runSdkmanager(bin, sdkPath, ['--licenses'], log, java).catch(() => { /* non fatal */ });
   log(`Instalando platform-tools, emulator e ${image} (pode demorar vários minutos)...`);
-  await runSdkmanager(bin, sdkPath, ['--install', 'platform-tools', 'emulator', image], log);
+  await runSdkmanager(bin, sdkPath, ['--install', 'platform-tools', 'emulator', image], log, java);
   log('Instalação concluída.');
   return getStatus(sdkPath);
 }
