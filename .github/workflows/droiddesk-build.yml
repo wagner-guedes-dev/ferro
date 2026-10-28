@@ -31,17 +31,29 @@ jobs:
       # Manual publish: create the version tag first (GitHub only accepts a
       # published release whose tag exists). Then electron-builder creates the
       # Release and uploads the installer + latest.yml for the auto-updater.
-      - name: Create version tag
-        if: inputs.publish == true
+      # Prepare the GitHub Release before electron-builder runs: create it (and
+      # the tag) if missing, and remove duplicate releases for the same tag that
+      # a previous parallel upload may have created. electron-builder then only
+      # uploads assets into this single release.
+      - name: Prepare release
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
-          VERSION=$(node -p "require('./package.json').version")
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git ls-remote --exit-code --tags origin "v$VERSION" >/dev/null; then
-            echo "Tag v$VERSION already exists"
+          VERSION=$(node -p "require('./package.json').version"); TAG="v$VERSION"
+          gh api "repos/$REPO/releases?per_page=100" --jq '.[] | select(.tag_name=="'"$TAG"'") | [.id, (([.assets[].name] | index("latest.yml")) != null), .created_at] | @tsv' > rel.tsv || true
+          KEEP=$(awk -F'\t' '$2=="true"{print $1; exit}' rel.tsv)
+          [ -z "$KEEP" ] && KEEP=$(sort -t$'\t' -k3 rel.tsv | head -1 | cut -f1)
+          while IFS=$'\t' read -r id has created; do
+            if [ -n "$id" ] && [ "$id" != "$KEEP" ]; then echo "Removing duplicate release $id"; gh api -X DELETE "repos/$REPO/releases/$id"; fi
+          done < rel.tsv
+          if [ -z "$KEEP" ]; then
+            echo "Creating release $TAG"
+            gh release create "$TAG" --title "DroidDesk $VERSION" --notes "DroidDesk $VERSION" --target "$GITHUB_SHA"
           else
-            git tag "v$VERSION" && git push origin "v$VERSION"
+            echo "Using existing release $KEEP"
           fi
       - name: Build and publish release
         if: startsWith(github.ref, 'refs/tags/v') || inputs.publish == true
