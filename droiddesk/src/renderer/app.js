@@ -15,7 +15,12 @@
     groups: [],
     proxies: [],
     profiles: [],
+    browsers: [],
+    detectedBrowsers: [],
     selected: new Set(),
+    bselected: new Set(),
+    bfilterGroup: 'all',
+    bfilterText: '',
     filterGroup: 'all',
     filterText: '',
     viewMode: 'grid',
@@ -88,29 +93,31 @@
 
   // ------------------------------------------------------------ loading
   async function loadAll() {
-    const [info, settings, meta, sdk, groups, proxies, profiles] = await Promise.all([
+    const [info, settings, meta, sdk, groups, proxies, profiles, browsers, detectedBrowsers] = await Promise.all([
       call(api.app.info()), call(api.settings.get()), call(api.meta.all()), call(api.sdk.status()),
-      call(api.groups.list()), call(api.proxies.list()), call(api.profiles.list()),
+      call(api.groups.list()), call(api.proxies.list()), call(api.profiles.list()), call(api.browsers.list()), call(api.browsers.detect()),
     ]);
-    Object.assign(state, { info, settings, meta, sdk, groups, proxies, profiles });
+    Object.assign(state, { info, settings, meta, sdk, groups, proxies, profiles, browsers, detectedBrowsers });
     I18N.setLang(settings.language || 'pt-BR');
     state.viewMode = settings.viewMode === 'list' ? 'list' : 'grid';
     applyI18n();
     renderAll();
   }
   async function reloadProfiles() { state.profiles = await call(api.profiles.list()); for (const id of [...state.selected]) if (!state.profiles.some((p) => p.id === id)) state.selected.delete(id); renderProfiles(); }
+  async function reloadBrowsers() { state.browsers = await call(api.browsers.list()); for (const id of [...state.bselected]) if (!state.browsers.some((p) => p.id === id)) state.bselected.delete(id); renderBrowsers(); }
   async function reloadProxies() { state.proxies = await call(api.proxies.list()); renderProxies(); renderCounts(); }
   async function reloadGroups() { state.groups = await call(api.groups.list()); renderGroupFilter(); renderCounts(); }
   async function reloadSdk() { state.sdk = await call(api.sdk.status()); renderSdkPill(); if (state.view === 'settings') renderSettings(); }
 
   function renderAll() {
-    renderCounts(); renderSdkPill(); renderGroupFilter(); renderProfiles(); renderProxies(); renderSettings(); renderHelp();
+    renderCounts(); renderSdkPill(); renderGroupFilter(); renderProfiles(); renderBrowsers(); renderProxies(); renderSettings(); renderHelp();
     $('#version').textContent = `DroidDesk v${state.info.version} · ${state.info.platform}/${state.info.arch}`;
     $$('#view-mode button').forEach((b) => b.classList.toggle('active', b.dataset.mode === state.viewMode));
   }
   function renderCounts() {
     $('#count-profiles').textContent = state.profiles.length;
     $('#count-proxies').textContent = state.proxies.length;
+    $('#count-browsers').textContent = state.browsers.length;
     $('#count-groups').textContent = state.groups.length;
   }
   function renderSdkPill() {
@@ -121,12 +128,14 @@
     $('#sdk-setup-link').style.display = s.ready ? 'none' : '';
   }
   function renderGroupFilter() {
-    const sel = $('#filter-group');
-    const cur = state.filterGroup;
-    sel.innerHTML = `<option value="all">${esc(t('all_groups'))}</option><option value="none">${esc(t('ungrouped'))}</option>` +
+    const html = `<option value="all">${esc(t('all_groups'))}</option><option value="none">${esc(t('ungrouped'))}</option>` +
       state.groups.map((g) => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
-    sel.value = [...sel.options].some((o) => o.value === cur) ? cur : 'all';
-    state.filterGroup = sel.value;
+    for (const [id, key] of [['#filter-group', 'filterGroup'], ['#bfilter-group', 'bfilterGroup']]) {
+      const sel = $(id); const cur = state[key];
+      sel.innerHTML = html;
+      sel.value = [...sel.options].some((o) => o.value === cur) ? cur : 'all';
+      state[key] = sel.value;
+    }
   }
 
   // ------------------------------------------------------------ profiles view
@@ -444,7 +453,7 @@
   }
 
   // ------------------------------------------------------------ move / groups modals
-  function openMoveModal(ids) {
+  function openMoveModal(ids, kind = 'profile') {
     return new Promise((resolve) => {
       modalResolve = resolve;
       const m = openModal(`<div class="m-head"><h3>${esc(t('move_title', { n: ids.length }))}</h3></div><div class="m-body">
@@ -456,7 +465,10 @@
         try { const g = await call(api.groups.create($('#mv-new', m).value)); await reloadGroups(); const sel = $('#mv-group', m); sel.insertAdjacentHTML('beforeend', `<option value="${esc(g.id)}">${esc(g.name)}</option>`); sel.value = g.id; $('#mv-new', m).value = ''; } catch (_) { /* shown */ }
       };
       $('#mv-ok', m).onclick = async () => {
-        try { await call(api.profiles.move(ids, $('#mv-group', m).value || null)); modalResolve = null; closeModal(); toast(t('toast_moved'), 'ok'); await reloadProfiles(); resolve(true); } catch (_) { /* shown */ }
+        try {
+          if (kind === 'browser') { await call(api.browsers.move(ids, $('#mv-group', m).value || null)); } else { await call(api.profiles.move(ids, $('#mv-group', m).value || null)); }
+          modalResolve = null; closeModal(); toast(t('toast_moved'), 'ok'); if (kind === 'browser') await reloadBrowsers(); else await reloadProfiles(); resolve(true);
+        } catch (_) { /* shown */ }
       };
     });
   }
@@ -464,15 +476,15 @@
     const render = () => {
       const m = $('#modal');
       $('#gr-list', m).innerHTML = state.groups.length ? state.groups.map((g) => `<div class="row" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)" data-gid="${esc(g.id)}">
-        <input class="input" value="${esc(g.name)}" style="flex:1"><span class="sub" style="color:var(--text-3);font-size:12px;white-space:nowrap">${esc(t('profiles_in_group', { n: state.profiles.filter((p) => p.groupId === g.id).length }))}</span>
+        <input class="input" value="${esc(g.name)}" style="flex:1"><span class="sub" style="color:var(--text-3);font-size:12px;white-space:nowrap">${esc(t('profiles_in_group', { n: state.profiles.filter((p) => p.groupId === g.id).length + state.browsers.filter((p) => p.groupId === g.id).length }))}</span>
         <button class="btn outline sm" data-g="rename">${esc(t('rename'))}</button><button class="btn danger sm" data-g="delete">${ICON.trash}</button></div>`).join('') : `<p class="hint" style="color:var(--text-3)">${esc(t('no_groups'))}</p>`;
       $$('[data-gid]', m).forEach((row) => {
         const gid = row.dataset.gid; const g = state.groups.find((x) => x.id === gid);
-        $('[data-g="rename"]', row).onclick = async () => { try { await call(api.groups.rename(gid, $('input', row).value)); await reloadGroups(); renderProfiles(); render(); toast(t('toast_saved'), 'ok'); } catch (_) { /* shown */ } };
+        $('[data-g="rename"]', row).onclick = async () => { try { await call(api.groups.rename(gid, $('input', row).value)); await reloadGroups(); renderProfiles(); renderBrowsers(); render(); toast(t('toast_saved'), 'ok'); } catch (_) { /* shown */ } };
         $('[data-g="delete"]', row).onclick = async () => {
           const m2 = $('#modal').innerHTML; // keep modal; use native-like inline confirm via window.confirm replacement
           if (!(await inlineConfirm(row, t('confirm_delete_group', { name: g.name })))) return;
-          try { await call(api.groups.delete(gid)); await reloadGroups(); await reloadProfiles(); render(); toast(t('toast_deleted'), 'ok'); } catch (_) { /* shown */ }
+          try { await call(api.groups.delete(gid)); await reloadGroups(); await reloadProfiles(); await reloadBrowsers(); render(); toast(t('toast_deleted'), 'ok'); } catch (_) { /* shown */ }
           void m2;
         };
       });
@@ -497,27 +509,202 @@
   }
 
   // ------------------------------------------------------------ logs modal
-  function openLogsModal(id) {
-    const p = state.profiles.find((x) => x.id === id); if (!p) return;
-    state.logsOpenFor = id;
+  function openLogsModal(id, kind = 'profile') {
+    const p = (kind === 'browser' ? state.browsers : state.profiles).find((x) => x.id === id); if (!p) return;
+    state.logsOpenFor = `${kind}:${id}`;
+    const src = kind === 'browser' ? api.browsers : api.profiles;
     const m = openModal(`<div class="m-head"><h3>${esc(t('log_title', { name: p.name }))}</h3><button class="btn outline sm" id="lg-copy">${esc(t('copy'))}</button></div>
       <div class="m-body"><div class="console" id="lg-console"></div></div><div class="m-foot"><button class="btn outline" id="lg-close">${esc(t('close'))}</button></div>`, { size: 'lg' });
     $('#lg-close', m).onclick = () => closeModal();
     $('#lg-copy', m).onclick = () => { navigator.clipboard.writeText($('#lg-console', m).textContent).then(() => toast(t('toast_copied'), 'ok')); };
-    call(api.profiles.log(id)).then((lines) => { const c = $('#lg-console'); if (!c) return; c.textContent = lines.length ? lines.join('\n') : t('log_empty'); c.scrollTop = c.scrollHeight; });
+    call(src.log(id)).then((lines) => { const c = $('#lg-console'); if (!c) return; c.textContent = lines.length ? lines.join('\n') : t('log_empty'); c.scrollTop = c.scrollHeight; });
   }
-  function appendLog(e) {
-    if (state.logsOpenFor !== e.profileId) return;
+  function appendLog(e, kind = 'profile') {
+    if (state.logsOpenFor !== `${kind}:${e.profileId}`) return;
     const c = $('#lg-console'); if (!c) return;
     if (c.textContent === t('log_empty')) c.textContent = '';
     c.textContent += (c.textContent ? '\n' : '') + e.line; c.scrollTop = c.scrollHeight;
+  }
+
+  // ------------------------------------------------------------ browsers view
+  const ICON_BROWSER = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" y1="8" x2="12" y2="8"/><line x1="3.95" y1="6.06" x2="8.54" y2="14"/><line x1="10.88" y1="21.94" x2="15.46" y2="14"/></svg>';
+  function browserName(p) {
+    if (p.browserId && p.browserId !== 'auto') { const b = state.detectedBrowsers.find((x) => x.id === p.browserId || x.path === p.browserId); if (b) return b.name; return p.browserId; }
+    return state.detectedBrowsers[0] ? `${state.detectedBrowsers[0].name}` : t('not_found');
+  }
+  function filteredBrowsers() {
+    const q = state.bfilterText.trim().toLowerCase();
+    return state.browsers.filter((p) => {
+      if (state.bfilterGroup === 'none' && p.groupId) return false;
+      if (state.bfilterGroup !== 'all' && state.bfilterGroup !== 'none' && p.groupId !== state.bfilterGroup) return false;
+      if (q && !(`${p.serial} ${p.name} ${p.tags.join(' ')} ${p.country}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+  }
+  function renderBrowsers() {
+    const root = $('#browsers-content');
+    const list = filteredBrowsers();
+    $('#btotal-count').textContent = t('total_records', { n: list.length });
+    $('#bselected-count').textContent = state.bselected.size ? t('selected', { n: state.bselected.size }) : '';
+    $('#bselect-all').checked = list.length > 0 && list.every((p) => state.bselected.has(p.id));
+    renderCounts();
+    if (!state.browsers.length) {
+      root.innerHTML = `<div class="empty"><div class="ill">${ICON_BROWSER}</div><h3>${esc(t('no_browsers_title'))}</h3><p>${esc(t('no_browsers_text'))}</p>${state.detectedBrowsers.length ? `<button class="btn primary" id="bempty-new">${esc(t('new_browser'))}</button>` : `<div class="note warn" style="display:inline-block">${esc(t('no_browser_found'))}</div>`}</div>`;
+      const b = $('#bempty-new'); if (b) b.onclick = () => openBrowserModal(null);
+      return;
+    }
+    if (!list.length) { root.innerHTML = `<div class="empty"><p>${esc(t('no_results'))}</p></div>`; return; }
+    root.innerHTML = `<div class="grid">${list.map(browserCardHtml).join('')}</div>`;
+    $$('[data-bid]', root).forEach((el) => {
+      const id = el.dataset.bid;
+      $('.sel', el).addEventListener('change', (e) => { if (e.target.checked) state.bselected.add(id); else state.bselected.delete(id); renderBrowsers(); });
+      const start = $('[data-act="start"]', el); if (start) start.onclick = () => startBrowser(id);
+      const stop = $('[data-act="stop"]', el); if (stop) stop.onclick = () => stopBrowser(id);
+      $('[data-menu]', el).onclick = (e) => { e.stopPropagation(); openBrowserMenu(e.currentTarget, id); };
+      el.addEventListener('dblclick', (e) => { if (!e.target.closest('button,input')) openBrowserModal(id); });
+    });
+  }
+  function browserCardHtml(p) {
+    const sel = state.bselected.has(p.id);
+    return `<div class="card ${sel ? 'selected' : ''} ${p.status === 'running' ? 'running' : ''}" data-bid="${esc(p.id)}">
+      <div class="head"><input type="checkbox" class="checkbox sel" ${sel ? 'checked' : ''}><div class="title"><span class="num">${p.serial}.</span> ${esc(p.name)}</div>${statusBadge(p)}</div>
+      <div class="row">${ICON_BROWSER}<span class="muted">${esc(browserName(p))}</span><span class="sub">· ${p.width}x${p.height}</span></div>
+      <div class="row">${ICON.pin}${flag(p.country)}<span>${esc(country(p.country).name)}</span><span class="sub">· ${esc(p.timezone)}</span>${proxyGeoWarn(p)}</div>
+      <div class="row">${ICON.net}${proxyChip(p)}</div>
+      <div class="row">${ICON.list}<span>${esc(groupName(p.groupId))}</span></div>
+      <div class="row">${ICON.tag}<span class="tags">${p.tags.map((x) => `<span class="chip">${esc(x)}</span>`).join('') || '<span class="sub">--</span>'}</span></div>
+      <div class="actions">${actionButtons(p)}<span class="sep"></span><button class="menu-btn" data-menu title="⋮">${ICON.dots}</button></div>
+    </div>`;
+  }
+  async function startBrowser(id) {
+    const p = state.browsers.find((x) => x.id === id);
+    if (!p || p.status !== 'stopped') return;
+    p.status = 'starting'; renderBrowsers();
+    try { await call(api.browsers.start(id)); toast(t('toast_started', { name: p.name }), 'ok'); }
+    catch (_) { p.status = 'stopped'; renderBrowsers(); }
+  }
+  async function stopBrowser(id) {
+    const p = state.browsers.find((x) => x.id === id);
+    if (!p || p.status === 'stopped') return;
+    p.status = 'stopping'; renderBrowsers();
+    try { await call(api.browsers.stop(id)); } catch (_) { /* shown */ }
+  }
+  async function deleteBrowsers(ids) {
+    if (!ids.length) return;
+    if (!(await confirmModal(t('confirm_delete_profiles', { n: ids.length }), t('yes_delete'), true))) return;
+    try { await call(api.browsers.delete(ids)); ids.forEach((id) => state.bselected.delete(id)); toast(t('toast_deleted'), 'ok'); await reloadBrowsers(); } catch (_) { /* shown */ }
+  }
+  async function checkBrowserProxy(id) {
+    const p = state.browsers.find((x) => x.id === id); if (!p) return;
+    try {
+      const r = await call(api.browsers.checkProxy(id));
+      if (r.direct) toast(t('toast_direct'), 'warn');
+      else if (r.ok) toast(`${p.name}: ${t('toast_proxy_ok', { ip: r.ip, country: r.country, ms: r.latency })}`, 'ok');
+      else toast(`${p.name}: ${t('toast_proxy_fail', { err: errMsg(r.error) })}`, 'err');
+      state.proxies = await call(api.proxies.list()); await reloadBrowsers(); renderProxies();
+    } catch (_) { /* shown */ }
+  }
+  async function bulkBrowsers(action) {
+    const ids = [...state.bselected];
+    if (!ids.length) { toast(t('selected', { n: 0 }), 'warn'); return; }
+    if (action === 'start') { for (const id of ids) await startBrowser(id); }
+    else if (action === 'stop') { await Promise.all(ids.map((id) => stopBrowser(id))); }
+    else if (action === 'delete') { await deleteBrowsers(ids); }
+    else if (action === 'move') { await openMoveModal(ids, 'browser'); }
+    else if (action === 'checkproxy') { for (const id of ids) await checkBrowserProxy(id); }
+  }
+  function openBrowserMenu(anchor, id) {
+    const p = state.browsers.find((x) => x.id === id); if (!p) return;
+    const ctx = $('#ctx');
+    const running = p.status !== 'stopped';
+    ctx.innerHTML = `
+      ${!running ? `<button data-m="start">${ICON.play}${esc(t('start'))}</button>` : `<button data-m="stop">${ICON.stop}${esc(t('stop'))}</button>`}
+      <button data-m="edit">${ICON.edit}${esc(t('edit'))}</button>
+      <button data-m="check">${ICON.check}${esc(t('check_proxy'))}</button>
+      <button data-m="logs">${ICON.log}${esc(t('logs'))}</button>
+      <button data-m="folder">${ICON.folder}${esc(t('open_folder_browser'))}</button>
+      <hr><button data-m="delete" class="danger">${ICON.trash}${esc(t('delete'))}</button>`;
+    const r = anchor.getBoundingClientRect();
+    ctx.classList.add('open');
+    const h = ctx.offsetHeight;
+    ctx.style.left = `${Math.min(r.left, window.innerWidth - 228)}px`;
+    ctx.style.top = `${r.bottom + h > window.innerHeight ? r.top - h : r.bottom + 4}px`;
+    ctx.onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      closeMenu();
+      const m = b.dataset.m;
+      if (m === 'start') startBrowser(id);
+      else if (m === 'stop') stopBrowser(id);
+      else if (m === 'edit') openBrowserModal(id);
+      else if (m === 'check') checkBrowserProxy(id);
+      else if (m === 'logs') openLogsModal(id, 'browser');
+      else if (m === 'folder') api.browsers.folder(id);
+      else if (m === 'delete') deleteBrowsers([id]);
+    };
+  }
+  function openBrowserModal(id) {
+    const p = id ? state.browsers.find((x) => x.id === id) : null;
+    if (!p && !state.detectedBrowsers.length) { toast(t('no_browser_found'), 'err'); showView('settings'); return; }
+    const v = p || { name: '', groupId: state.bfilterGroup !== 'all' && state.bfilterGroup !== 'none' ? state.bfilterGroup : null, tags: [], browserId: 'auto', country: 'BR', locale: 'pt-BR', timezone: 'America/Sao_Paulo', width: 1280, height: 800, startUrl: '', notes: '', proxyMode: 'none', proxyId: null, proxy: null };
+    const m = openModal(`<div class="m-head"><h3>${esc(p ? t('browser_modal_edit') : t('browser_modal_new'))}</h3></div>
+      <form class="m-body" id="bf">
+        <div class="form-grid">
+          <div class="field"><label>${esc(t('f_name'))}</label><input class="input" id="bf-name" value="${esc(v.name)}" required maxlength="60"></div>
+          <div class="field"><label>${esc(t('f_group'))}</label><select class="select" id="bf-group"><option value="">${esc(t('ungrouped'))}</option>${state.groups.map((g) => `<option value="${esc(g.id)}" ${v.groupId === g.id ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
+          <div class="field full"><label>${esc(t('f_tags'))}</label><input class="input" id="bf-tags" value="${esc(v.tags.join(', '))}" placeholder="facebook, loja, teste"></div>
+          <div class="field"><label>${esc(t('f_browser'))}</label><select class="select" id="bf-browser"><option value="auto">${esc(t('browser_auto'))}</option>${state.detectedBrowsers.map((b) => `<option value="${esc(b.id)}" ${v.browserId === b.id ? 'selected' : ''}>${esc(b.name)}</option>`).join('')}</select></div>
+          <div class="field"><label>${esc(t('f_window'))}</label><div class="inline"><input class="input" id="bf-width" type="number" min="400" max="3840" value="${esc(v.width)}"><input class="input" id="bf-height" type="number" min="300" max="2160" value="${esc(v.height)}"></div></div>
+          <div class="field full"><label>${esc(t('f_start_url'))}</label><input class="input" id="bf-url" value="${esc(v.startUrl)}" placeholder="https://"></div>
+        </div>
+        <div class="panel"><h4>${esc(t('f_country'))}</h4>
+          <div class="hint" style="font-size:12px;color:var(--text-3)">${esc(t('country_hint'))} ${esc(t('browser_tz_hint'))}</div>
+          <div class="form-grid">
+            <div class="field"><label>${esc(t('f_country'))}</label><select class="select" id="pf-country">${state.meta.countries.map((c) => `<option value="${c.code}" ${v.country === c.code ? 'selected' : ''}>${c.flag} ${esc(c.name)}</option>`).join('')}</select></div>
+            <div class="field"><label>${esc(t('f_locale'))}</label><input class="input" id="pf-locale" value="${esc(v.locale)}"></div>
+            <div class="field full"><label>${esc(t('f_timezone'))}</label><input class="input" id="pf-tz" value="${esc(v.timezone)}" list="tz-list2"><datalist id="tz-list2">${state.meta.countries.map((c) => `<option value="${c.timezone}">`).join('')}</datalist></div>
+          </div>
+        </div>
+        <div class="panel"><h4>${esc(t('f_proxy'))}</h4>
+          <div class="radios">${['none', 'saved', 'inline'].map((mode) => `<label><input type="radio" name="pf-pmode" value="${mode}" ${v.proxyMode === mode ? 'checked' : ''}><span>${esc(t(`proxy_${mode}`))}</span></label>`).join('')}</div>
+          <div id="pf-saved" class="field" style="display:none"><label>${esc(t('f_proxy_select'))}</label><select class="select" id="pf-proxy-id">${state.proxies.map((x) => `<option value="${esc(x.id)}" ${v.proxyId === x.id ? 'selected' : ''}>${esc(x.name)} · ${x.type.toUpperCase()} ${esc(x.host)}:${x.port}${x.lastCheck && x.lastCheck.ok ? ` · ${esc(x.lastCheck.countryCode)} ${esc(x.lastCheck.ip)}` : ''}</option>`).join('')}</select>${state.proxies.length ? '' : `<div class="hint">${esc(t('no_proxies'))}</div>`}</div>
+          <div id="pf-inline" style="display:none">${proxyFields('pfx', v.proxy || {})}</div>
+        </div>
+        <div class="field"><label>${esc(t('f_notes'))}</label><textarea class="input" id="bf-notes" rows="2">${esc(v.notes)}</textarea></div>
+      </form>
+      <div class="m-foot"><button class="btn outline" type="button" id="bf-cancel">${esc(t('cancel'))}</button><button class="btn primary" type="submit" form="bf" id="bf-save">${esc(p ? t('save') : t('create'))}</button></div>`);
+    const updateMode = () => { const mode = $('input[name="pf-pmode"]:checked', m).value; $('#pf-saved', m).style.display = mode === 'saved' ? '' : 'none'; $('#pf-inline', m).style.display = mode === 'inline' ? '' : 'none'; };
+    $$('input[name="pf-pmode"]', m).forEach((r) => r.addEventListener('change', updateMode)); updateMode();
+    bindProxyFields('pfx', m);
+    if (v.proxy && v.proxy.lastCheck && v.proxy.lastCheck.ok) { const out = $('#pfx-result', m); const lc = v.proxy.lastCheck; out.className = 'test-result full ok'; out.textContent = `✔ ${lc.ip} · ${lc.country} (${lc.countryCode}) · ${lc.city || ''} · ${lc.latency} ms`; }
+    const syncSaved = () => { const px = state.proxies.find((x) => x.id === $('#pf-proxy-id', m).value); if (px && px.lastCheck && px.lastCheck.ok) applyGeoToProfileForm(m, px.lastCheck); };
+    $('#pf-proxy-id', m).addEventListener('change', syncSaved);
+    $$('input[name="pf-pmode"]', m).forEach((r) => r.addEventListener('change', () => { if (r.value === 'saved' && r.checked) syncSaved(); }));
+    $('#pf-country', m).addEventListener('change', (e) => { const c = country(e.target.value); $('#pf-locale', m).value = c.locale; $('#pf-tz', m).value = c.timezone; });
+    $('#bf-cancel', m).onclick = () => closeModal();
+    $('#bf', m).onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('#bf-save', m); btn.disabled = true; btn.textContent = p ? t('saving') : t('creating');
+      const mode = $('input[name="pf-pmode"]:checked', m).value;
+      const input = {
+        name: $('#bf-name', m).value, groupId: $('#bf-group', m).value || null,
+        tags: $('#bf-tags', m).value.split(',').map((x) => x.trim()).filter(Boolean),
+        browserId: $('#bf-browser', m).value, width: $('#bf-width', m).value, height: $('#bf-height', m).value, startUrl: $('#bf-url', m).value.trim(),
+        country: $('#pf-country', m).value, locale: $('#pf-locale', m).value.trim(), timezone: $('#pf-tz', m).value.trim(), notes: $('#bf-notes', m).value,
+        proxyMode: mode, proxyId: mode === 'saved' ? $('#pf-proxy-id', m).value : null,
+        proxy: mode === 'inline' ? { ...readProxyFields('pfx', m), lastCheck: m.__lastProxyCheck || (v.proxy && v.proxy.lastCheck) || null } : null,
+      };
+      try {
+        if (p) await call(api.browsers.update(p.id, input)); else await call(api.browsers.create(input));
+        closeModal(); toast(t('toast_saved'), 'ok'); await reloadBrowsers();
+      } catch (_) { btn.disabled = false; btn.textContent = p ? t('save') : t('create'); }
+    };
   }
 
   // ------------------------------------------------------------ proxies view
   function renderProxies() {
     const root = $('#proxies-content');
     if (!state.proxies.length) { root.innerHTML = `<div class="empty"><div class="ill">${ICON.net}</div><h3>${esc(t('proxies_title'))}</h3><p>${esc(t('no_proxies'))}</p><button class="btn primary" id="px-empty-new">${esc(t('new_proxy'))}</button></div>`; $('#px-empty-new').onclick = () => openProxyModal(null); return; }
-    const usedBy = (id) => state.profiles.filter((p) => p.proxyMode === 'saved' && p.proxyId === id);
+    const usedBy = (id) => [...state.profiles, ...state.browsers].filter((p) => p.proxyMode === 'saved' && p.proxyId === id);
     root.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(t('col_name'))}</th><th>${esc(t('col_type'))}</th><th>${esc(t('col_address'))}</th><th>${esc(t('col_auth'))}</th><th>${esc(t('col_status'))}</th><th>${esc(t('col_ip'))}</th><th>${esc(t('col_used'))}</th><th>${esc(t('col_actions'))}</th></tr></thead><tbody>` +
       state.proxies.map((x) => {
         const lc = x.lastCheck;
@@ -538,7 +725,7 @@
   async function checkProxy(id, row) {
     const btn = row && $('[data-px="check"]', row); if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spin"></span>`; }
     try { await call(api.proxies.check(id)); } catch (_) { /* shown */ }
-    await reloadProxies(); renderProfiles();
+    await reloadProxies(); renderProfiles(); renderBrowsers();
   }
   function openProxyModal(id) {
     const x = id ? state.proxies.find((y) => y.id === id) : null;
@@ -572,6 +759,10 @@
         <div class="k">${esc(t('col_status'))}</div><div class="v" id="upd-status">${esc(updateText())}</div>
         <div class="k"></div><div class="v"><button class="btn outline sm" id="upd-check" ${state.update.state === 'checking' || state.update.state === 'downloading' ? 'disabled' : ''}>${esc(t('upd_check'))}</button>${state.update.state === 'downloaded' ? `<button class="btn primary sm" id="upd-install">${esc(t('upd_install'))}</button>` : ''}</div>
       </div></div>
+      <div class="panel"><h4>${esc(t('browser_section'))}</h4><div class="kv">
+        <div class="k">${esc(t('browsers_found'))}</div><div class="v" style="flex-wrap:wrap">${state.detectedBrowsers.length ? state.detectedBrowsers.map((b) => `<span class="chip" title="${esc(b.path)}">${esc(b.name)}</span>`).join('') : yesno(false, t('not_found'))}</div>
+        <div class="k">${esc(t('browser_path'))}</div><div class="v"><input class="input" id="st-browser" value="${esc(state.settings.browserPath || '')}" style="flex:1" placeholder="chrome.exe"><button class="btn outline sm" id="st-browser-browse">${esc(t('browse'))}</button><button class="btn primary sm" id="st-browser-save">${esc(t('save_path'))}</button></div>
+      </div></div>
       <div class="panel"><h4>${esc(t('sdk_section'))}</h4>
         <div class="kv">
           <div class="k">${esc(t('sdk_path'))}</div><div class="v"><input class="input" id="st-sdk" value="${esc(s.sdkPath)}" style="flex:1"><button class="btn outline sm" id="st-browse">${esc(t('browse'))}</button><button class="btn primary sm" id="st-save-sdk">${esc(t('save_path'))}</button></div>
@@ -594,6 +785,8 @@
       </div>`;
     $('#upd-check', root).onclick = async () => { state.update = { ...state.update, state: 'checking' }; renderSettings(); await call(api.update.check(), { silent: true }).catch(() => {}); };
     const ui = $('#upd-install', root); if (ui) ui.onclick = () => api.update.install();
+    $('#st-browser-browse', root).onclick = async () => { const r = await call(api.dialog.openFile({ title: t('browser_path'), filters: [{ name: 'Browser', extensions: state.info.platform === 'win32' ? ['exe'] : ['*'] }] })); if (r && r.path) $('#st-browser', root).value = r.path; };
+    $('#st-browser-save', root).onclick = async () => { state.settings = await call(api.settings.set({ browserPath: $('#st-browser', root).value.trim() })); state.detectedBrowsers = await call(api.browsers.detect()); toast(t('toast_saved'), 'ok'); renderSettings(); renderBrowsers(); };
     $('#st-lang', root).onchange = async (e) => { await call(api.settings.set({ language: e.target.value })); I18N.setLang(e.target.value); applyI18n(); renderAll(); };
     $('#st-browse', root).onclick = async () => { const p = await call(api.dialog.pickFolder(t('sdk_path'))); if (p) $('#st-sdk', root).value = p; };
     $('#st-save-sdk', root).onclick = async () => { await call(api.settings.set({ sdkPath: $('#st-sdk', root).value.trim() })); await reloadSdk(); renderProfiles(); toast(t('toast_saved'), 'ok'); };
@@ -673,6 +866,7 @@
     $$('.nav-item[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
     if (name === 'settings') reloadSdk().then(renderSettings);
     if (name === 'proxies') renderProxies();
+    if (name === 'browsers') renderBrowsers();
   }
   document.addEventListener('click', (e) => {
     const nav = e.target.closest('[data-view]'); if (nav) { showView(nav.dataset.view); return; }
@@ -685,10 +879,23 @@
   $('#btn-refresh').onclick = async () => { await reloadSdk(); await reloadGroups(); await reloadProxies(); await reloadProfiles(); };
   $$('[data-bulk]').forEach((b) => { b.onclick = () => bulk(b.dataset.bulk); });
   $('#select-all').addEventListener('change', (e) => { const list = filteredProfiles(); list.forEach((p) => { if (e.target.checked) state.selected.add(p.id); else state.selected.delete(p.id); }); renderProfiles(); });
+  $('#bfilter-group').addEventListener('change', (e) => { state.bfilterGroup = e.target.value; renderBrowsers(); });
+  $('#bfilter-text').addEventListener('input', (e) => { state.bfilterText = e.target.value; renderBrowsers(); });
+  $('#btn-new-browser').onclick = () => openBrowserModal(null);
+  $('#btn-brefresh').onclick = async () => { state.detectedBrowsers = await call(api.browsers.detect()); await reloadGroups(); await reloadProxies(); await reloadBrowsers(); };
+  $$('[data-bbulk]').forEach((b) => { b.onclick = () => bulkBrowsers(b.dataset.bbulk); });
+  $('#bselect-all').addEventListener('change', (e) => { filteredBrowsers().forEach((p) => { if (e.target.checked) state.bselected.add(p.id); else state.bselected.delete(p.id); }); renderBrowsers(); });
+  api.browsers.onStatus((e) => {
+    const p = state.browsers.find((x) => x.id === e.profileId); if (!p) return;
+    p.status = e.status;
+    if (e.status === 'stopped' && e.detail) toast(`${p.name}: ${t(`exit_${e.detail}`) !== `exit_${e.detail}` ? t(`exit_${e.detail}`) : errMsg(e.detail)}`, 'err', 8000);
+    renderBrowsers();
+  });
+  api.browsers.onLog((e) => appendLog(e, 'browser'));
   $('#btn-new-proxy').onclick = () => openProxyModal(null);
   $('#btn-import-proxies').onclick = openImportModal;
   $('#btn-check-all').onclick = async () => { for (const x of state.proxies) { try { await call(api.proxies.check(x.id), { silent: true }); } catch (_) { /* ignore */ } } await reloadProxies(); renderProfiles(); };
-  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n' && state.view === 'profiles') { e.preventDefault(); openProfileModal(null); } });
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { if (state.view === 'profiles') { e.preventDefault(); openProfileModal(null); } else if (state.view === 'browsers') { e.preventDefault(); openBrowserModal(null); } } });
 
   api.profiles.onStatus((e) => {
     const p = state.profiles.find((x) => x.id === e.profileId);

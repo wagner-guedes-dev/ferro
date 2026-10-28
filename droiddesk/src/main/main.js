@@ -9,10 +9,12 @@ const proxyLib = require('./proxy');
 const meta = require('./meta');
 const { EmulatorManager } = require('./emulator');
 const { setupUpdater } = require('./updater');
+const browsers = require('./browsers');
 
 let win = null;
 let store = null;
 const emu = new EmulatorManager();
+const bm = new browsers.BrowserManager();
 let sdkStatus = null;
 let updater = null;
 
@@ -68,6 +70,12 @@ emu.on('status', (e) => {
   send('profile:status', e);
 });
 emu.on('log', (e) => send('profile:log', e));
+bm.on('status', (e) => {
+  const p = store.browsers.find((x) => x.id === e.profileId);
+  if (p && e.status === 'running') { p.lastStartedAt = new Date().toISOString(); store.save(); }
+  send('browser:status', e);
+});
+bm.on('log', (e) => send('browser:log', e));
 
 function refreshSdk() {
   sdkStatus = sdk.getStatus(store.settings.sdkPath);
@@ -76,9 +84,11 @@ function refreshSdk() {
 }
 
 app.on('before-quit', async (e) => {
-  if (emu.instances.size && [...emu.instances.values()].some((i) => i.status !== 'stopped')) {
+  const anyEmu = [...emu.instances.values()].some((i) => i.status !== 'stopped');
+  const anyBrowser = [...bm.instances.values()].some((i) => i.status !== 'stopped');
+  if (anyEmu || anyBrowser) {
     e.preventDefault();
-    await emu.stopAll();
+    await Promise.all([emu.stopAll(), bm.stopAll()]);
     app.exit(0);
   }
 });
@@ -134,7 +144,7 @@ handle('app:info', () => ({
 handle('settings:get', () => store.settings);
 handle('settings:set', (patch) => {
   const allowed = {};
-  for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode', 'javaHome']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode', 'javaHome', 'browserPath']) if (k in patch) allowed[k] = patch[k];
   const s = store.setSettings(allowed);
   refreshSdk();
   return s;
@@ -205,6 +215,7 @@ handle('groups:rename', (id, name) => {
 handle('groups:delete', (id) => {
   store.data.groups = store.groups.filter((g) => g.id !== id);
   for (const p of store.profiles) if (p.groupId === id) p.groupId = null;
+  for (const p of store.browsers) if (p.groupId === id) p.groupId = null;
   store.save();
   return true;
 });
@@ -240,7 +251,7 @@ handle('proxies:update', (id, input) => {
   return p;
 });
 handle('proxies:delete', (id) => {
-  if (store.profiles.some((pr) => pr.proxyMode === 'saved' && pr.proxyId === id)) throw new Error('PROXY_IN_USE');
+  if (store.profiles.some((pr) => pr.proxyMode === 'saved' && pr.proxyId === id) || store.browsers.some((pr) => pr.proxyMode === 'saved' && pr.proxyId === id)) throw new Error('PROXY_IN_USE');
   store.data.proxies = store.proxies.filter((x) => x.id !== id);
   store.save();
   return true;
@@ -413,4 +424,96 @@ handle('profiles:checkProxy', async (id) => {
     proxy.lastCheck = res; store.save();
     return res;
   }
+});
+
+// ---------- browser profiles ----------
+function browserDataDir(p) { return path.join(app.getPath('userData'), 'browser-profiles', p.id); }
+function publicBrowser(p) { return { ...p, status: bm.statusOf(p.id) }; }
+function resolveBrowserPath(p) {
+  const list = browsers.detectBrowsers(store.settings.browserPath);
+  if (p.browserId && p.browserId !== 'auto') {
+    const found = list.find((b) => b.id === p.browserId || b.path === p.browserId);
+    if (found) return found;
+  }
+  return list[0] || null;
+}
+function validateBrowserInput(input) {
+  const name = String(input.name || '').trim();
+  if (!name) throw new Error('INVALID_NAME');
+  const country = meta.findCountry(input.country);
+  const out = {
+    name,
+    groupId: input.groupId && store.groups.some((g) => g.id === input.groupId) ? input.groupId : null,
+    tags: Array.isArray(input.tags) ? input.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 20) : [],
+    browserId: String(input.browserId || 'auto'),
+    country: country.code,
+    locale: String(input.locale || country.locale),
+    timezone: String(input.timezone || country.timezone),
+    width: Math.min(3840, Math.max(400, parseInt(input.width, 10) || 1280)),
+    height: Math.min(2160, Math.max(300, parseInt(input.height, 10) || 800)),
+    startUrl: /^https?:\/\//i.test(String(input.startUrl || '').trim()) ? String(input.startUrl).trim() : '',
+    notes: String(input.notes || ''),
+    proxyMode: ['none', 'saved', 'inline'].includes(input.proxyMode) ? input.proxyMode : 'none',
+    proxyId: null,
+    proxy: null,
+  };
+  if (out.proxyMode === 'saved') {
+    if (!store.proxies.some((p) => p.id === input.proxyId)) throw new Error('PROXY_NOT_FOUND');
+    out.proxyId = input.proxyId;
+  } else if (out.proxyMode === 'inline') {
+    out.proxy = sanitizeProxy(input.proxy || {});
+  }
+  return out;
+}
+handle('browsers:detect', () => browsers.detectBrowsers(store.settings.browserPath));
+handle('browsers:list', () => store.browsers.map(publicBrowser));
+handle('browsers:create', (input) => {
+  const v = validateBrowserInput(input);
+  const p = { id: Store.newId(), serial: store.nextSerial(), createdAt: new Date().toISOString(), lastStartedAt: null, ...v };
+  store.browsers.push(p);
+  store.save();
+  return publicBrowser(p);
+});
+handle('browsers:update', (id, input) => {
+  const p = store.browsers.find((x) => x.id === id);
+  if (!p) throw new Error('NOT_FOUND');
+  Object.assign(p, validateBrowserInput({ ...p, ...input }));
+  store.save();
+  return publicBrowser(p);
+});
+handle('browsers:move', (ids, groupId) => {
+  const gid = groupId && store.groups.some((g) => g.id === groupId) ? groupId : null;
+  for (const p of store.browsers) if (ids.includes(p.id)) p.groupId = gid;
+  store.save();
+  return true;
+});
+handle('browsers:delete', async (ids) => {
+  for (const id of ids) {
+    await bm.stop(id).catch(() => {});
+    const p = store.browsers.find((x) => x.id === id);
+    if (p) fs.rmSync(browserDataDir(p), { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+    bm.instances.delete(id);
+  }
+  store.data.browsers = store.browsers.filter((x) => !ids.includes(x.id));
+  store.save();
+  return true;
+});
+handle('browsers:start', async (id) => {
+  const p = store.browsers.find((x) => x.id === id);
+  if (!p) throw new Error('NOT_FOUND');
+  const b = resolveBrowserPath(p);
+  if (!b) throw new Error('BROWSER_MISSING');
+  return bm.start(p, resolveProxy(p), { browserPath: b.path, dataDir: browserDataDir(p) });
+});
+handle('browsers:stop', (id) => bm.stop(id));
+handle('browsers:log', (id) => bm.getLog(id));
+handle('browsers:size', (id) => { const p = store.browsers.find((x) => x.id === id); return p ? browsers.dirSize(browserDataDir(p)) : 0; });
+handle('browsers:folder', (id) => { const p = store.browsers.find((x) => x.id === id); if (p) shell.openPath(browserDataDir(p)); });
+handle('browsers:checkProxy', async (id) => {
+  const p = store.browsers.find((x) => x.id === id);
+  if (!p) throw new Error('NOT_FOUND');
+  const proxy = resolveProxy(p);
+  if (!proxy) return { ok: true, direct: true };
+  try { const res = await proxyLib.checkProxy(proxy); proxy.lastCheck = res; store.save(); return res; }
+  catch (err) { const res = { ok: false, error: err.message, checkedAt: new Date().toISOString() }; proxy.lastCheck = res; store.save(); return res; }
 });

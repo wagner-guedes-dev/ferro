@@ -14,6 +14,7 @@ class Store {
       groups: [],
       proxies: [],
       profiles: [],
+      browsers: [],
     };
     this.load();
   }
@@ -29,6 +30,7 @@ class Store {
           groups: Array.isArray(raw.groups) ? raw.groups : [],
           proxies: Array.isArray(raw.proxies) ? raw.proxies : [],
           profiles: Array.isArray(raw.profiles) ? raw.profiles : [],
+          browsers: Array.isArray(raw.browsers) ? raw.browsers : [],
         };
       }
     } catch (err) {
@@ -53,6 +55,7 @@ class Store {
   get profiles() { return this.data.profiles; }
   get proxies() { return this.data.proxies; }
   get groups() { return this.data.groups; }
+  get browsers() { return this.data.browsers; }
 
   setSettings(patch) {
     Object.assign(this.data.settings, patch);

@@ -327,6 +327,21 @@ test('sdk detects fake SDK tree and lists images', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('browser launch args are isolated and proxied', () => {
+  const { buildArgs, detectBrowsers } = require('../src/main/browsers');
+  const args = buildArgs({ locale: 'en-US', width: 1280, height: 800, startUrl: 'https://example.com' }, { dataDir: '/tmp/x/profile', bridgePort: 45000 });
+  assert.ok(args.includes('--user-data-dir=/tmp/x/profile'));
+  assert.ok(args.includes('--proxy-server=http://127.0.0.1:45000'));
+  assert.ok(args.includes('--force-webrtc-ip-handling-policy=disable_non_proxied_udp'));
+  assert.ok(args.includes('--lang=en-US'));
+  assert.ok(args.includes('--window-size=1280,800'));
+  assert.strictEqual(args[args.length - 1], 'https://example.com');
+  const noProxy = buildArgs({ locale: 'pt-BR' }, { dataDir: '/tmp/y', bridgePort: null });
+  assert.ok(!noProxy.some((a) => a.startsWith('--proxy-server')));
+  assert.ok(Array.isArray(detectBrowsers('')));
+  assert.strictEqual(detectBrowsers('/definitely/missing').find((b) => b.id === 'custom'), undefined);
+});
+
 test('meta helpers', () => {
   assert.strictEqual(meta.androidVersionName(34), '14');
   assert.strictEqual(meta.androidVersionName(99), 'API 99');

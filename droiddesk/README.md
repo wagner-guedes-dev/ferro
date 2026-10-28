@@ -7,6 +7,13 @@ verificação de IP e muito mais. Funciona com ou sem proxy.
 
 ![DroidDesk](../img/droiddesk-preview.png)
 
+## Duas abas, dois tipos de perfil
+
+- **Perfis (Android):** telefones virtuais completos no emulador oficial do Google.
+- **Navegadores:** perfis de navegador isolados (Chrome, Edge, Brave ou Chromium já instalados no PC),
+  cada um com cookies, logins, cache, proxy, idioma e tamanho de janela próprios, como no AdsPower.
+  Os dados de cada perfil ficam em `browser-profiles/<id>` dentro da pasta de dados do app.
+
 ## Como funciona
 
 - Usa o **emulador oficial do Android (Google)**: gratuito, estável e com imagens de sistema do
