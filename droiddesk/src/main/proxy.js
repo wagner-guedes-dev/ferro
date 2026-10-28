@@ -167,7 +167,7 @@ async function checkProxy(proxy) {
     sock.on('data', (c) => { data += c.toString('utf8'); });
     sock.on('error', reject);
     sock.on('close', () => resolve(data));
-    sock.write(`GET /json/?fields=status,message,country,countryCode,city,timezone,query,isp HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: DroidDesk\r\nConnection: close\r\n\r\n`);
+    sock.write(`GET /json/?fields=status,message,country,countryCode,city,timezone,query,isp,lat,lon HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: DroidDesk\r\nConnection: close\r\n\r\n`);
   });
   const sep = body.indexOf('\r\n\r\n');
   if (sep === -1) throw new Error('BAD_RESPONSE');
@@ -198,6 +198,8 @@ async function checkProxy(proxy) {
     city: json.city,
     timezone: json.timezone,
     isp: json.isp,
+    lat: typeof json.lat === 'number' ? json.lat : null,
+    lon: typeof json.lon === 'number' ? json.lon : null,
     latency: Date.now() - started,
     checkedAt: new Date().toISOString(),
   };

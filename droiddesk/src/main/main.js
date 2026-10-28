@@ -115,7 +115,7 @@ function sanitizeProxy(input) {
   if (!p.host || !Number.isFinite(p.port) || p.port < 1 || p.port > 65535) throw new Error('INVALID_PROXY');
   const lc = input.lastCheck;
   if (lc && typeof lc === 'object' && lc.ok === true && typeof lc.countryCode === 'string') {
-    p.lastCheck = { ok: true, ip: String(lc.ip || ''), country: String(lc.country || ''), countryCode: lc.countryCode.slice(0, 2).toUpperCase(), city: String(lc.city || ''), timezone: String(lc.timezone || ''), latency: Number(lc.latency) || 0, checkedAt: String(lc.checkedAt || new Date().toISOString()) };
+    p.lastCheck = { ok: true, ip: String(lc.ip || ''), country: String(lc.country || ''), countryCode: lc.countryCode.slice(0, 2).toUpperCase(), city: String(lc.city || ''), timezone: String(lc.timezone || ''), latency: Number(lc.latency) || 0, lat: Number.isFinite(lc.lat) ? lc.lat : null, lon: Number.isFinite(lc.lon) ? lc.lon : null, checkedAt: String(lc.checkedAt || new Date().toISOString()) };
   }
   return p;
 }

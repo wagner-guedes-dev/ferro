@@ -332,7 +332,7 @@ test('meta helpers', () => {
   assert.strictEqual(meta.androidVersionName(99), 'API 99');
   assert.strictEqual(meta.findCountry('XX').code, 'BR');
   assert.strictEqual(meta.findDevice('nope').id, 'pixel_6');
-  assert.ok(meta.COUNTRIES.every((c) => c.locale && c.timezone && c.flag));
+  assert.ok(meta.COUNTRIES.every((c) => c.locale && c.timezone && c.flag && Number.isFinite(c.lat) && Number.isFinite(c.lon)));
 });
 
 (async () => {

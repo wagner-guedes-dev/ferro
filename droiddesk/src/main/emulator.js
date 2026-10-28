@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const { startBridge } = require('./proxy');
 const { avdHome } = require('./avd');
+const { findCountry } = require('./meta');
 
 const IS_WIN = process.platform === 'win32';
 
@@ -69,7 +70,7 @@ class EmulatorManager extends EventEmitter {
     if (!this.sdk || !this.sdk.hasEmulator) throw new Error('SDK_MISSING');
     if (this.instances.has(profile.id) && this.instances.get(profile.id).status !== 'stopped') throw new Error('ALREADY_RUNNING');
     this.customAvdHome = opts.avdHome || '';
-    const inst = { profileId: profile.id, status: 'starting', child: null, bridge: null, log: [], port: profile.port, startedAt: Date.now() };
+    const inst = { profileId: profile.id, status: 'starting', child: null, bridge: null, log: [], port: profile.port, startedAt: Date.now(), proxy: proxy || null };
     this.instances.set(profile.id, inst);
     this._set(inst, 'starting');
 
@@ -152,6 +153,15 @@ class EmulatorManager extends EventEmitter {
   async _postBoot(inst, profile, serial) {
     const cmds = [];
     if (profile.deviceName) cmds.push(['shell', 'settings', 'put', 'global', 'device_name', profile.deviceName]);
+    // GPS: use the proxy's detected coordinates, otherwise the profile country's main city.
+    const lc = inst.proxy && inst.proxy.lastCheck;
+    const country = findCountry(profile.country);
+    const lat = lc && lc.ok && Number.isFinite(lc.lat) ? lc.lat : country.lat;
+    const lon = lc && lc.ok && Number.isFinite(lc.lon) ? lc.lon : country.lon;
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      cmds.push(['emu', 'geo', 'fix', String(lon), String(lat)]);
+      this._log(inst, `GPS definido para ${lat}, ${lon} (${lc && lc.ok && Number.isFinite(lc.lat) ? 'local do proxy' : country.name}).`);
+    }
     for (const c of cmds) {
       try { await this.adb(['-s', serial, ...c]); } catch (err) { this._log(inst, `adb ${c.join(' ')}: ${err.message}`); }
     }
