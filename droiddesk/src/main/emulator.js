@@ -80,6 +80,15 @@ class EmulatorManager extends EventEmitter {
     if (profile.locale) args.push('-change-locale', profile.locale.replace('_', '-'));
     try {
       if (proxy) {
+        // The emulator's network daemon (netsimd) survives emulator exits and only
+        // reads the proxy when it starts. Restart it so the new bridge port is used.
+        const othersRunning = [...this.instances.values()].some((i) => i !== inst && i.status !== 'stopped');
+        if (!othersRunning) {
+          const killed = await killNetsimd();
+          this._log(inst, killed ? 'Serviço de rede do emulador (netsimd) reiniciado para aplicar o proxy.' : 'Serviço de rede do emulador (netsimd) não estava em execução.');
+        } else {
+          this._log(inst, 'Outro telefone está aberto: o proxy de host do emulador segue o primeiro; este perfil usa o proxy configurado dentro do Android.');
+        }
         inst.bridge = await startBridge(proxy);
         args.push('-http-proxy', `http://127.0.0.1:${inst.bridge.port}`);
         this._log(inst, `Ponte de proxy ativa em 127.0.0.1:${inst.bridge.port} -> ${proxy.type}://${proxy.host}:${proxy.port}`);
@@ -248,6 +257,18 @@ class EmulatorManager extends EventEmitter {
     const dir = path.join(avdHome(home), `${avdId}.avd`);
     return fs.existsSync(path.join(dir, 'hardware-qemu.ini.lock'));
   }
+}
+
+// Kill a lingering netsimd (shared by all emulators). Resolves true if one was running.
+function killNetsimd() {
+  return new Promise((resolve) => {
+    const cmd = IS_WIN ? 'taskkill' : 'pkill';
+    const args = IS_WIN ? ['/F', '/IM', 'netsimd.exe'] : ['-x', 'netsimd'];
+    execFile(cmd, args, { windowsHide: true, timeout: 10000 }, (err) => {
+      if (err) return resolve(false);
+      setTimeout(() => resolve(true), 800);
+    });
+  });
 }
 
 function killTree(child) {
