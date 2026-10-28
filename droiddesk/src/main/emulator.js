@@ -153,6 +153,20 @@ class EmulatorManager extends EventEmitter {
   async _postBoot(inst, profile, serial) {
     const cmds = [];
     if (profile.deviceName) cmds.push(['shell', 'settings', 'put', 'global', 'device_name', profile.deviceName]);
+    // Second proxy layer, independent of the emulator's host-level -http-proxy:
+    // tunnel the bridge into the guest through ADB and set Android's global proxy.
+    if (inst.bridge) {
+      const port = inst.bridge.port;
+      try {
+        await this.adb(['-s', serial, 'reverse', `tcp:${port}`, `tcp:${port}`]);
+        await this.adb(['-s', serial, 'shell', 'settings', 'put', 'global', 'http_proxy', `127.0.0.1:${port}`]);
+        this._log(inst, `Proxy configurado dentro do Android: 127.0.0.1:${port} (túnel ADB -> ponte -> ${inst.proxy.type} ${inst.proxy.host}:${inst.proxy.port}).`);
+      } catch (err) {
+        this._log(inst, `Falha ao configurar proxy dentro do Android: ${err.message}`);
+      }
+    } else {
+      try { await this.adb(['-s', serial, 'shell', 'settings', 'put', 'global', 'http_proxy', ':0']); } catch (_) { /* ignore */ }
+    }
     // GPS: use the proxy's detected coordinates, otherwise the profile country's main city.
     const lc = inst.proxy && inst.proxy.lastCheck;
     const country = findCountry(profile.country);
@@ -165,6 +179,17 @@ class EmulatorManager extends EventEmitter {
     for (const c of cmds) {
       try { await this.adb(['-s', serial, ...c]); } catch (err) { this._log(inst, `adb ${c.join(' ')}: ${err.message}`); }
     }
+    if (inst.bridge) this._startBridgeReport(inst);
+  }
+
+  _startBridgeReport(inst) {
+    const report = () => {
+      if (!inst.bridge || inst.status === 'stopped') return;
+      const st = inst.bridge.stats;
+      this._log(inst, `Ponte de proxy: ${st.connections} conexões, ${Math.round(st.bytesIn / 1024)} KB recebidos, ${st.errors} erros.`);
+    };
+    setTimeout(report, 20000);
+    inst.reportTimer = setInterval(report, 60000);
   }
 
   async stop(profileId) {
@@ -195,7 +220,10 @@ class EmulatorManager extends EventEmitter {
   }
 
   async _cleanup(inst, detail) {
-    if (inst.bridge) { try { await inst.bridge.close(); } catch (_) { /* ignore */ } inst.bridge = null; }
+    if (inst.reportTimer) { clearInterval(inst.reportTimer); inst.reportTimer = null; }
+    if (inst.bridge) {
+      const st = inst.bridge.stats;
+      this._log(inst, `Ponte de proxy encerrada: ${st.connections} conexões no total, ${st.errors} erros.`); try { await inst.bridge.close(); } catch (_) { /* ignore */ } inst.bridge = null; }
     if (inst.status !== 'stopped') this._set(inst, 'stopped', detail || '');
   }
 
