@@ -16,6 +16,7 @@ const MOCK = `
     settings: { language: 'pt-BR', sdkPath: '', avdHome: '', viewMode: 'grid' },
     groups: [{ id: 'g1', name: 'Loja' }],
     proxies: [{ id: 'px1', name: 'Alemanha', type: 'socks5', host: '1.2.3.4', port: 1080, username: 'u', password: 'p', lastCheck: { ok: true, ip: '5.6.7.8', country: 'Germany', countryCode: 'DE', city: 'Berlin', latency: 120 } }],
+    browsers: [],
     profiles: [
       { id: 'p1', serial: 1, name: 'Alema recem monetiz', avdId: 'droiddesk_p1', port: 5554, groupId: null, tags: [], country: 'DE', locale: 'de-DE', timezone: 'Europe/Berlin', device: { manufacturer: 'Google', model: 'Pixel 6', width: 1080, height: 2400, density: 420 }, deviceId: 'pixel_6', ram: 3072, storage: 8, androidVersion: '14', api: 34, abi: 'x86_64', proxyMode: 'saved', proxyId: 'px1', proxy: null, status: 'stopped', deviceName: '', notes: '' },
       { id: 'p2', serial: 2, name: 'Conta Francesa', avdId: 'droiddesk_p2', port: 5556, groupId: 'g1', tags: ['tiktok', 'teste'], country: 'FR', locale: 'fr-FR', timezone: 'Europe/Paris', device: { manufacturer: 'samsung', model: 'SM-S911B', width: 1080, height: 2340, density: 420 }, deviceId: 'galaxy_s23', ram: 4096, storage: 8, androidVersion: '13', api: 33, abi: 'x86_64', proxyMode: 'none', proxyId: null, proxy: null, status: 'running', deviceName: '', notes: '' },
@@ -50,6 +51,19 @@ const MOCK = `
       check: (id) => { const x = state.proxies.find((y) => y.id === id); x.lastCheck = { ok: false, error: 'ECONNREFUSED' }; return ok(x.lastCheck); },
       test: (p) => p.host === 'bad' ? fail('TIMEOUT') : ok({ ip: '1.1.1.1', country: 'Brazil', countryCode: 'BR', city: 'SP', isp: 'ISP', latency: 50, timezone: 'America/Sao_Paulo' }),
       parse: (s) => { const m = s.match(/^([^:]+):(\\d+):([^:]+):(.+)$/); return ok(m ? { type: 'http', host: m[1], port: +m[2], username: m[3], password: m[4] } : null); },
+    },
+    browsers: {
+      detect: () => ok([{ id: 'chrome', name: 'Google Chrome', path: 'C:\\chrome.exe' }, { id: 'edge', name: 'Microsoft Edge', path: 'C:\\msedge.exe' }]),
+      list: () => ok(state.browsers),
+      create: (p) => { if (!p.name) return fail('INVALID_NAME'); const x = { id: 'b' + Date.now(), serial: 50 + state.browsers.length, status: 'stopped', ...p, width: +p.width, height: +p.height }; state.browsers.push(x); rec('browsers.create', x); return ok(x); },
+      update: (id, p) => { Object.assign(state.browsers.find((x) => x.id === id), p); return ok(true); },
+      move: (ids, gid) => { state.browsers.forEach((p) => { if (ids.includes(p.id)) p.groupId = gid; }); rec('bmove', ids, gid); return ok(true); },
+      delete: (ids) => { state.browsers = state.browsers.filter((p) => !ids.includes(p.id)); return ok(true); },
+      start: (id) => { rec('bstart', id); setTimeout(() => window.__emit('browser:status', { profileId: id, status: 'running', detail: '' }), 50); return ok({}); },
+      stop: (id) => { setTimeout(() => window.__emit('browser:status', { profileId: id, status: 'stopped', detail: '' }), 50); return ok(true); },
+      log: () => ok(['$ chrome ...']), size: () => ok(1), folder: () => ok(true),
+      checkProxy: () => ok({ ok: true, direct: true }),
+      onStatus: on('browser:status'), onLog: on('browser:log'),
     },
     profiles: {
       list: () => ok(state.profiles),
@@ -200,6 +214,46 @@ const MOCK = `
   await page.waitForFunction(() => window.__calls.some((c) => c[0] === 'saveFile'));
   await page.locator('[data-bulk="checkproxy"]').click();
   await page.waitForSelector('.toast.ok');
+
+  // 10b. browsers view: empty state, create, start/stop, move, delete
+  await page.locator('.nav-item[data-view="browsers"]').click();
+  await page.waitForSelector('#bempty-new');
+  await page.locator('#bempty-new').click();
+  await page.waitForSelector('#bf');
+  await page.fill('#bf-name', 'Loja Facebook');
+  await page.selectOption('#bf-browser', 'edge');
+  await page.selectOption('#pf-country', 'DE');
+  assert.strictEqual(await page.inputValue('#pf-tz'), 'Europe/Berlin');
+  await page.fill('#bf-url', 'https://facebook.com');
+  await page.locator('label:has(input[name="pf-pmode"][value="saved"])').click();
+  await page.locator('#bf-save').click();
+  await page.waitForSelector('.card[data-bid]');
+  const bcreated = await page.evaluate(() => window.__calls.find((c) => c[0] === 'browsers.create')[1]);
+  assert.strictEqual(bcreated.browserId, 'edge');
+  assert.strictEqual(bcreated.proxyMode, 'saved');
+  assert.strictEqual(bcreated.proxyId, 'px1');
+  assert.strictEqual(bcreated.startUrl, 'https://facebook.com');
+  assert.ok((await page.locator('.card[data-bid]').innerText()).includes('Microsoft Edge'));
+  await page.locator('.card[data-bid] [data-act="start"]').click();
+  await page.waitForSelector('.card[data-bid] .status.running');
+  await page.locator('.card[data-bid] [data-act="stop"]').click();
+  await page.waitForSelector('.card[data-bid] .status.stopped');
+  await page.locator('.card[data-bid] [data-menu]').click();
+  await page.locator('#ctx [data-m="logs"]').click();
+  await page.waitForFunction(() => document.querySelector('#lg-console') && document.querySelector('#lg-console').innerText.includes('chrome'));
+  await page.locator('#lg-close').click();
+  await page.locator('#bselect-all').check();
+  await page.locator('[data-bbulk="move"]').click();
+  await page.waitForSelector('#mv-group');
+  await page.selectOption('#mv-group', 'g1');
+  await page.locator('#mv-ok').click();
+  await page.waitForFunction(() => window.__calls.some((c) => c[0] === 'bmove'));
+  assert.strictEqual(await page.locator('#count-browsers').innerText(), '1');
+  await shot('08-browsers');
+  await page.locator('.card[data-bid] [data-menu]').click();
+  await page.locator('#ctx [data-m="delete"]').click();
+  await page.locator('[data-x="ok"]').click();
+  await page.waitForSelector('#bempty-new');
 
   // 11. proxies view: table, new proxy modal with validation, import, delete in-use error
   await page.locator('.nav-item[data-view="proxies"]').click();
