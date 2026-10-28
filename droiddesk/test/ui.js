@@ -142,6 +142,10 @@ const MOCK = `
   assert.strictEqual(await page.inputValue('#pfx-user'), 'user');
   await page.locator('#pfx-test').click();
   await page.waitForSelector('#pfx-result.ok');
+  // proxy test detected BR -> country/locale/timezone follow the proxy
+  await page.waitForFunction(() => document.querySelector('#pf-country').value === 'BR');
+  assert.strictEqual(await page.inputValue('#pf-locale'), 'pt-BR');
+  assert.strictEqual(await page.inputValue('#pf-tz'), 'America/Sao_Paulo');
   await shot('04-new-profile');
   await page.fill('#pf-tags', 'uk, teste');
   await page.locator('#pf-save').click();
@@ -150,6 +154,8 @@ const MOCK = `
   const created = await page.evaluate(() => window.__calls.find((c) => c[0] === 'profiles.create')[1]);
   assert.strictEqual(created.proxyMode, 'inline');
   assert.strictEqual(created.proxy.host, '10.0.0.1');
+  assert.strictEqual(created.proxy.lastCheck.countryCode, 'BR');
+  assert.strictEqual(created.country, 'BR');
   assert.deepStrictEqual(created.tags, ['uk', 'teste']);
   assert.strictEqual(created.imageId, 'system-images;android-34;google_apis;x86_64');
 

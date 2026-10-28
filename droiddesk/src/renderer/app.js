@@ -146,6 +146,12 @@
     const geo = px.lastCheck && px.lastCheck.ok ? ` · ${px.lastCheck.countryCode || ''} ${px.lastCheck.ip || ''}` : '';
     return `<span class="chip proxy ${bad ? 'bad' : ''}">${esc(px.type.toUpperCase())}</span><span class="sub" title="${esc(label)}">${esc(px.host)}:${esc(px.port)}${esc(geo)}</span>`;
   }
+  // Small warning when the proxy's detected country differs from the profile's country.
+  function proxyGeoWarn(p) {
+    const px = proxyOf(p);
+    if (!px || !px.lastCheck || !px.lastCheck.ok || !px.lastCheck.countryCode || px.lastCheck.countryCode === p.country) return '';
+    return `<span class="chip" style="color:var(--yellow);border-color:var(--yellow)" title="${esc(t('geo_mismatch', { country: px.lastCheck.country }))}">⚠ ${esc(px.lastCheck.countryCode)}</span>`;
+  }
   function statusBadge(p) { return `<span class="status ${esc(p.status)}">${esc(t(`status_${p.status}`))}</span>`; }
 
   function renderProfiles() {
@@ -186,7 +192,7 @@
     return `<div class="card ${sel ? 'selected' : ''} ${p.status === 'running' ? 'running' : ''}" data-id="${esc(p.id)}">
       <div class="head"><input type="checkbox" class="checkbox sel" ${sel ? 'checked' : ''}><div class="title"><span class="num">${p.serial}.</span> ${esc(p.name)}</div>${statusBadge(p)}</div>
       <div class="row">${ICON.phone}<span class="muted">${esc(p.device.manufacturer)} ${esc(p.device.model)}</span><span class="sub">· ${esc(t('port'))} ${p.port}</span></div>
-      <div class="row">${ICON.pin}${flag(p.country)}<span>${esc(country(p.country).name)}</span><span class="sub">· ${esc(p.timezone)}</span></div>
+      <div class="row">${ICON.pin}${flag(p.country)}<span>${esc(country(p.country).name)}</span><span class="sub">· ${esc(p.timezone)}</span>${proxyGeoWarn(p)}</div>
       <div class="row">${ICON.android}<span class="android">${esc(t('android'))} ${esc(p.androidVersion)}</span><span class="sub">· ${esc(t('ram'))} ${p.ram} MB · ${esc(t('storage'))} ${p.storage} GB</span></div>
       <div class="row">${ICON.net}${proxyChip(p)}</div>
       <div class="row">${ICON.list}<span>${esc(groupName(p.groupId))}</span></div>
@@ -342,9 +348,23 @@
         const r = await call(api.proxies.test(readProxyFields(prefix, m)), { silent: true });
         out.className = 'test-result full ok'; out.textContent = `✔ ${r.ip} · ${r.country} (${r.countryCode}) · ${r.city || ''} · ${r.isp || ''} · ${r.latency} ms · ${r.timezone}`;
         out.dataset.country = r.countryCode || ''; out.dataset.timezone = r.timezone || '';
+        m.__lastProxyCheck = r;
+        if (prefix === 'pfx') applyGeoToProfileForm(m, r);
       } catch (err) { out.className = 'test-result full bad'; out.textContent = `✖ ${errMsg(err.message)}`; }
       btn.disabled = false; btn.querySelector('span').textContent = t('test');
     };
+  }
+
+  // Set country / locale / timezone from a proxy check result (like GeeLark does).
+  function applyGeoToProfileForm(m, r) {
+    if (!r || !r.countryCode) return;
+    const sel = $('#pf-country', m); if (!sel) return;
+    const c = state.meta.countries.find((x) => x.code === r.countryCode);
+    if (!c) { toast(t('geo_unknown', { country: r.country || r.countryCode }), 'warn'); return; }
+    sel.value = c.code;
+    $('#pf-locale', m).value = c.locale;
+    $('#pf-tz', m).value = r.timezone || c.timezone;
+    toast(t('geo_applied', { country: c.name }), 'ok');
   }
 
   // ------------------------------------------------------------ profile modal
@@ -373,6 +393,7 @@
           </div>
         </div>
         <div class="panel"><h4>${esc(t('f_country'))}</h4>
+          <div class="hint" style="font-size:12px;color:var(--text-3)">${esc(t('country_hint'))}</div>
           <div class="form-grid">
             <div class="field"><label>${esc(t('f_country'))}</label><select class="select" id="pf-country">${state.meta.countries.map((c) => `<option value="${c.code}" ${v.country === c.code ? 'selected' : ''}>${c.flag} ${esc(c.name)}</option>`).join('')}</select></div>
             <div class="field"><label>${esc(t('f_locale'))}</label><input class="input" id="pf-locale" value="${esc(v.locale)}"></div>
@@ -390,6 +411,13 @@
     const updateMode = () => { const mode = $('input[name="pf-pmode"]:checked', m).value; $('#pf-saved', m).style.display = mode === 'saved' ? '' : 'none'; $('#pf-inline', m).style.display = mode === 'inline' ? '' : 'none'; };
     $$('input[name="pf-pmode"]', m).forEach((r) => r.addEventListener('change', updateMode)); updateMode();
     bindProxyFields('pfx', m);
+    if (v.proxy && v.proxy.lastCheck && v.proxy.lastCheck.ok) {
+      const out = $('#pfx-result', m); const lc = v.proxy.lastCheck;
+      out.className = 'test-result full ok'; out.textContent = `✔ ${lc.ip} · ${lc.country} (${lc.countryCode}) · ${lc.city || ''} · ${lc.latency} ms`;
+    }
+    const syncSaved = () => { const px = state.proxies.find((x) => x.id === $('#pf-proxy-id', m).value); if (px && px.lastCheck && px.lastCheck.ok) applyGeoToProfileForm(m, px.lastCheck); };
+    $('#pf-proxy-id', m).addEventListener('change', syncSaved);
+    $$('input[name="pf-pmode"]', m).forEach((r) => r.addEventListener('change', () => { if (r.value === 'saved' && r.checked) syncSaved(); }));
     if (!p) {
       $('#pf-device', m).addEventListener('change', (e) => { const d = devices.find((x) => x.id === e.target.value); if (d) $('#pf-ram', m).value = d.ram; });
     }
@@ -404,7 +432,7 @@
         tags: $('#pf-tags', m).value.split(',').map((x) => x.trim()).filter(Boolean),
         country: $('#pf-country', m).value, locale: $('#pf-locale', m).value.trim(), timezone: $('#pf-tz', m).value.trim(),
         deviceName: $('#pf-devname', m).value, notes: $('#pf-notes', m).value,
-        proxyMode: mode, proxyId: mode === 'saved' ? $('#pf-proxy-id', m).value : null, proxy: mode === 'inline' ? readProxyFields('pfx', m) : null,
+        proxyMode: mode, proxyId: mode === 'saved' ? $('#pf-proxy-id', m).value : null, proxy: mode === 'inline' ? { ...readProxyFields('pfx', m), lastCheck: m.__lastProxyCheck || (v.proxy && v.proxy.lastCheck) || null } : null,
       };
       if (!p) Object.assign(input, { deviceId: $('#pf-device', m).value, imageId: $('#pf-image', m).value, ram: $('#pf-ram', m).value, storage: $('#pf-storage', m).value });
       try {

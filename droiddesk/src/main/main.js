@@ -113,6 +113,10 @@ function sanitizeProxy(input) {
     password: String(input.password || ''),
   };
   if (!p.host || !Number.isFinite(p.port) || p.port < 1 || p.port > 65535) throw new Error('INVALID_PROXY');
+  const lc = input.lastCheck;
+  if (lc && typeof lc === 'object' && lc.ok === true && typeof lc.countryCode === 'string') {
+    p.lastCheck = { ok: true, ip: String(lc.ip || ''), country: String(lc.country || ''), countryCode: lc.countryCode.slice(0, 2).toUpperCase(), city: String(lc.city || ''), timezone: String(lc.timezone || ''), latency: Number(lc.latency) || 0, checkedAt: String(lc.checkedAt || new Date().toISOString()) };
+  }
   return p;
 }
 
@@ -394,11 +398,11 @@ handle('profiles:checkProxy', async (id) => {
   if (!proxy) return { ok: true, direct: true };
   try {
     const res = await proxyLib.checkProxy(proxy);
-    if (p.proxyMode === 'saved') { proxy.lastCheck = res; store.save(); }
+    proxy.lastCheck = res; store.save();
     return res;
   } catch (err) {
     const res = { ok: false, error: err.message, checkedAt: new Date().toISOString() };
-    if (p.proxyMode === 'saved') { proxy.lastCheck = res; store.save(); }
+    proxy.lastCheck = res; store.save();
     return res;
   }
 });
