@@ -8,11 +8,13 @@ const avd = require('./avd');
 const proxyLib = require('./proxy');
 const meta = require('./meta');
 const { EmulatorManager } = require('./emulator');
+const { setupUpdater } = require('./updater');
 
 let win = null;
 let store = null;
 const emu = new EmulatorManager();
 let sdkStatus = null;
+let updater = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -27,6 +29,7 @@ function boot() {
   refreshSdk();
   Menu.setApplicationMenu(null);
   createWindow();
+  updater = setupUpdater({ send, getWindow: () => win });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
@@ -153,6 +156,11 @@ handle('dialog:openFile', async (opts) => {
   if (r.canceled) return null;
   return { path: r.filePaths[0], content: fs.readFileSync(r.filePaths[0], 'utf8') };
 });
+
+// ---------- updates ----------
+handle('update:status', () => updater.status());
+handle('update:check', () => updater.check());
+handle('update:install', () => updater.install());
 
 // ---------- meta ----------
 handle('meta:all', () => ({ devices: meta.DEVICES, countries: meta.COUNTRIES, versions: meta.ANDROID_VERSIONS }));

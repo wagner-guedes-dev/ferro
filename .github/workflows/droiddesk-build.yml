@@ -2,21 +2,53 @@ name: DroidDesk — build installers
 
 on:
   push:
-    tags: ['droiddesk-v*']
-    paths: ['droiddesk/**']
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: droiddesk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: droiddesk/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # On a version tag, electron-builder creates the GitHub Release and uploads
+      # the installer + latest.yml, which the app's auto-updater reads.
+      - name: Build and publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run dist:win -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Build only (manual run)
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: npm run dist:win -- --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: droiddesk-windows
+          path: |
+            droiddesk/dist/*.exe
+            droiddesk/dist/latest.yml
+          if-no-files-found: error
+
+  mac-linux:
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            cmd: dist:win
           - os: macos-latest
             cmd: dist:mac
           - os: ubuntu-latest
@@ -33,7 +65,6 @@ jobs:
           cache: npm
           cache-dependency-path: droiddesk/package-lock.json
       - run: npm ci
-      - run: npm test
       - run: npm run ${{ matrix.cmd }} -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -41,17 +72,7 @@ jobs:
         with:
           name: droiddesk-${{ matrix.os }}
           path: |
-            droiddesk/dist/*.exe
             droiddesk/dist/*.dmg
             droiddesk/dist/*.AppImage
             droiddesk/dist/*.deb
           if-no-files-found: error
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/droiddesk-v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            droiddesk/dist/*.exe
-            droiddesk/dist/*.dmg
-            droiddesk/dist/*.AppImage
-            droiddesk/dist/*.deb

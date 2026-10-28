@@ -33,6 +33,7 @@ const MOCK = `
     shell: { openExternal: (u) => { rec('openExternal', u); return ok(true); }, openPath: (p) => { rec('openPath', p); return ok(''); } },
     dialog: { pickFolder: () => ok('D:\\\\sdk'), saveFile: (o) => { rec('saveFile', o.defaultPath); return ok('D:\\\\out.json'); }, openFile: () => ok(null) },
     meta: { all: () => ok(__META__) },
+    update: { status: () => ok({ state: 'idle', version: null, percent: 0, error: '' }), check: () => { setTimeout(() => window.__emit('update:status', { state: 'downloaded', version: '9.9.9', percent: 100, error: '' }), 30); return ok({ state: 'checking' }); }, install: () => { rec('update.install'); return ok(true); }, onStatus: on('update:status') },
     sdk: { status: () => ok(sdk), java: () => ok({ bin: 'java', version: '17.0.9' }), install: () => { rec('install'); window.__emit('sdk:log', 'linha de log'); return ok(sdk); }, onLog: on('sdk:log') },
     groups: {
       list: () => ok(state.groups),
@@ -244,6 +245,11 @@ const MOCK = `
   await page.locator('.nav-item[data-view="settings"]').click();
   await page.waitForSelector('#st-install');
   await page.waitForFunction(() => document.querySelector('#st-java') && document.querySelector('#st-java').innerText.includes('17.0.9'));
+  await page.locator('#upd-check').click();
+  await page.waitForSelector('#upd-install');
+  await page.waitForFunction(() => document.querySelector('#upd-status').innerText.includes('9.9.9'));
+  await page.locator('#upd-install').click();
+  await page.waitForFunction(() => window.__calls.some((c) => c[0] === 'update.install'));
   await page.locator('#st-browse').click();
   await page.waitForFunction(() => document.querySelector('#st-sdk').value === 'D:\\sdk');
   await page.locator('#st-install').click();

@@ -1,6 +1,11 @@
 appId: com.wagnerguedes.droiddesk
 productName: DroidDesk
 copyright: Copyright © 2026 Wagner Guedes
+publish:
+  provider: github
+  owner: wagner-guedes-dev
+  repo: ferro
+  releaseType: release
 directories:
   output: dist
   buildResources: build

@@ -23,6 +23,7 @@
     logsOpenFor: null,
     installing: false,
     installLog: [],
+    update: { state: 'idle', version: null, percent: 0, error: '' },
   };
 
   // ------------------------------------------------------------ helpers
@@ -566,6 +567,11 @@
     const apis = [36, 35, 34, 33, 32, 31, 30, 29, 28];
     root.innerHTML = `
       <div class="panel"><h4>${esc(t('language'))}</h4><div class="kv"><div class="k">${esc(t('language'))}</div><div class="v"><select class="select" id="st-lang"><option value="pt-BR" ${I18N.getLang() === 'pt-BR' ? 'selected' : ''}>Português (Brasil)</option><option value="en" ${I18N.getLang() === 'en' ? 'selected' : ''}>English</option></select></div></div></div>
+      <div class="panel"><h4>${esc(t('upd_section'))}</h4><div class="kv">
+        <div class="k">${esc(t('upd_current'))}</div><div class="v">v${esc(state.info.version)}</div>
+        <div class="k">${esc(t('col_status'))}</div><div class="v" id="upd-status">${esc(updateText())}</div>
+        <div class="k"></div><div class="v"><button class="btn outline sm" id="upd-check" ${state.update.state === 'checking' || state.update.state === 'downloading' ? 'disabled' : ''}>${esc(t('upd_check'))}</button>${state.update.state === 'downloaded' ? `<button class="btn primary sm" id="upd-install">${esc(t('upd_install'))}</button>` : ''}</div>
+      </div></div>
       <div class="panel"><h4>${esc(t('sdk_section'))}</h4>
         <div class="kv">
           <div class="k">${esc(t('sdk_path'))}</div><div class="v"><input class="input" id="st-sdk" value="${esc(s.sdkPath)}" style="flex:1"><button class="btn outline sm" id="st-browse">${esc(t('browse'))}</button><button class="btn primary sm" id="st-save-sdk">${esc(t('save_path'))}</button></div>
@@ -586,6 +592,8 @@
         <div style="display:flex;gap:10px;align-items:center"><button class="btn primary" id="st-install" ${state.installing ? 'disabled' : ''}>${state.installing ? '<span class="spin"></span>' : ''}<span>${esc(state.installing ? t('installing') : t('install_now'))}</span></button><span id="st-install-msg" style="font-size:13px;color:var(--text-2)"></span></div>
         <div class="console" id="st-console" style="${state.installLog.length ? '' : 'display:none'}">${esc(state.installLog.join('\n'))}</div>
       </div>`;
+    $('#upd-check', root).onclick = async () => { state.update = { ...state.update, state: 'checking' }; renderSettings(); await call(api.update.check(), { silent: true }).catch(() => {}); };
+    const ui = $('#upd-install', root); if (ui) ui.onclick = () => api.update.install();
     $('#st-lang', root).onchange = async (e) => { await call(api.settings.set({ language: e.target.value })); I18N.setLang(e.target.value); applyI18n(); renderAll(); };
     $('#st-browse', root).onclick = async () => { const p = await call(api.dialog.pickFolder(t('sdk_path'))); if (p) $('#st-sdk', root).value = p; };
     $('#st-save-sdk', root).onclick = async () => { await call(api.settings.set({ sdkPath: $('#st-sdk', root).value.trim() })); await reloadSdk(); renderProfiles(); toast(t('toast_saved'), 'ok'); };
@@ -599,6 +607,16 @@
     const dl = $('#st-java-dl', root); if (dl) dl.onclick = () => api.shell.openExternal('https://adoptium.net/temurin/releases/?version=17');
     $('#st-java-browse', root).onclick = async () => { const p = await call(api.dialog.pickFolder(t('java_home_ph'))); if (p) $('#st-java-home', root).value = p; };
     $('#st-java-save', root).onclick = async () => { state.settings = await call(api.settings.set({ javaHome: $('#st-java-home', root).value.trim() })); toast(t('toast_saved'), 'ok'); renderSettings(); };
+  }
+  function updateText() {
+    const u = state.update;
+    if (u.state === 'unsupported') return t('upd_unsupported');
+    if (u.state === 'checking') return t('upd_checking');
+    if (u.state === 'none') return t('upd_none');
+    if (u.state === 'downloading') return t('upd_downloading', { version: u.version || '', percent: u.percent || 0 });
+    if (u.state === 'downloaded') return t('upd_downloaded', { version: u.version || '' });
+    if (u.state === 'error') return t('upd_error', { error: u.error || '' });
+    return t('upd_idle');
   }
   async function runInstall(apiLevel, tag) {
     if (state.installing) return;
@@ -683,6 +701,14 @@
   });
   api.profiles.onLog(appendLog);
   api.sdk.onLog(appendInstallLog);
+  api.update.onStatus((u) => {
+    const prev = state.update.state;
+    state.update = u;
+    if (u.state === 'downloading' && prev !== 'downloading') toast(t('toast_upd_available', { version: u.version }), 'info', 6000);
+    if (u.state === 'downloaded' && prev !== 'downloaded') toast(t('toast_upd_ready', { version: u.version }), 'ok', 8000);
+    if (state.view === 'settings') renderSettings();
+  });
+  call(api.update.status(), { silent: true }).then((u) => { state.update = u; if (state.view === 'settings') renderSettings(); }).catch(() => {});
 
   loadAll().catch((err) => { toast(`Init error: ${err.message}`, 'err', 10000); });
 })();

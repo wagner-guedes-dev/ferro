@@ -54,15 +54,27 @@ npm run dist:linux   # Linux: AppImage + .deb
 Os arquivos ficam em `droiddesk/dist/`. O instalador do Windows deve ser gerado no próprio
 Windows (ou em Linux com `wine` instalado).
 
-### Build automático no GitHub
+### Build automático e atualização automática
 
-O workflow `.github/workflows/droiddesk-build.yml` gera os instaladores para Windows, macOS e Linux.
-Para disparar:
+O app usa **electron-updater**: ao abrir (e a cada 4 horas) ele consulta as *Releases* do GitHub,
+baixa a versão nova em segundo plano e pergunta se quer reiniciar para instalar. Só a versão com
+instalador (Setup) se atualiza sozinha; a portátil apenas avisa.
 
-- **Manual:** aba *Actions* → *DroidDesk — build installers* → *Run workflow*. Os arquivos ficam em
-  *Artifacts*.
-- **Release:** crie uma tag `droiddesk-v1.0.0` e envie (`git tag droiddesk-v1.0.0 && git push origin droiddesk-v1.0.0`).
-  Os instaladores são anexados automaticamente à release.
+Para publicar uma versão nova:
+
+```bash
+cd droiddesk
+npm version patch        # 1.0.1 -> 1.0.2 (ou minor/major)
+git push origin main
+git push origin v1.0.2   # a tag dispara o workflow
+```
+
+O workflow `.github/workflows/droiddesk-build.yml` compila no Windows, cria a Release `v1.0.2` e
+anexa `DroidDesk-Setup-1.0.2.exe` + `latest.yml`. Em alguns minutos todos os apps instalados
+recebem a atualização. O workflow precisa existir no branch `main` para o GitHub reconhecê-lo.
+
+Também é possível rodar manualmente (aba *Actions* → *Run workflow*) para gerar os arquivos como
+*Artifacts*, sem publicar release.
 
 ## Testes
 
