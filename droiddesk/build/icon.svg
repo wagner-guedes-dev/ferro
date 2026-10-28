@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b82f6"/><stop offset="1" stop-color="#22c55e"/></linearGradient>
+    <linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f1218"/><stop offset="1" stop-color="#05070a"/></linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="220" fill="url(#g)"/>
+  <rect x="312" y="176" width="400" height="672" rx="64" fill="url(#s)"/>
+  <rect x="344" y="232" width="336" height="520" rx="24" fill="#111722"/>
+  <rect x="456" y="200" width="112" height="14" rx="7" fill="#2c3140"/>
+  <circle cx="512" cy="800" r="22" fill="#2c3140"/>
+  <path fill="#22c55e" d="M512 330c-66 0-120 42-130 100h260c-10-58-64-100-130-100zm-56 44a12 12 0 1 1 0 24 12 12 0 0 1 0-24zm112 0a12 12 0 1 1 0 24 12 12 0 0 1 0-24zM382 450v150c0 11 9 20 20 20h18v60c0 14 11 25 25 25s25-11 25-25v-60h84v60c0 14 11 25 25 25s25-11 25-25v-60h18c11 0 20-9 20-20V450H382zm-50 0c-14 0-25 11-25 25v110c0 14 11 25 25 25s25-11 25-25V475c0-14-11-25-25-25zm360 0c-14 0-25 11-25 25v110c0 14 11 25 25 25s25-11 25-25V475c0-14-11-25-25-25z"/>
+</svg>

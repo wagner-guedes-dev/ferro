@@ -1,0 +1,48 @@
+appId: com.wagnerguedes.droiddesk
+productName: DroidDesk
+copyright: Copyright © 2026 Wagner Guedes
+publish:
+  provider: github
+  owner: wagner-guedes-dev
+  repo: ferro
+  releaseType: release
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - build/icon.png
+  - package.json
+  - "!**/*.map"
+asar: true
+compression: maximum
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: build/icon.png
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: DroidDesk
+  installerLanguages: [pt_BR, en_US]
+  language: 1046
+  artifactName: ${productName}-Setup-${version}.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+mac:
+  target: [dmg]
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+linux:
+  target: [AppImage, deb]
+  icon: build/icon.png
+  category: Development
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
