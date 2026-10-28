@@ -3,7 +3,7 @@
   "productName": "DroidDesk",
   "version": "1.0.1",
   "description": "Gerenciador de perfis de emulador Android com proxy, estilo GeeLark/AdsPower",
-  "author": "Wagner Guedes",
+  "author": { "name": "Wagner Guedes", "email": "wagnerguedes123@hotmail.com" },
   "license": "MIT",
   "repository": {
     "type": "git",

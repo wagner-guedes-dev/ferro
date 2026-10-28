@@ -43,6 +43,7 @@ mac:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
 linux:
   target: [AppImage, deb]
+  maintainer: Wagner Guedes <wagnerguedes123@hotmail.com>
   icon: build/icon.png
   category: Development
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
