@@ -90,7 +90,7 @@ class BrowserManager extends EventEmitter {
   async start(profile, proxy, { browserPath, dataDir }) {
     if (!browserPath || !fs.existsSync(browserPath)) throw new Error('BROWSER_MISSING');
     if (this.instances.has(profile.id) && this.instances.get(profile.id).status !== 'stopped') throw new Error('ALREADY_RUNNING');
-    const inst = { profileId: profile.id, status: 'starting', child: null, bridge: null, log: [], startedAt: Date.now() };
+    const inst = { profileId: profile.id, status: 'starting', child: null, bridge: null, log: [], startedAt: Date.now(), proxy: proxy || null };
     this.instances.set(profile.id, inst);
     this._set(inst, 'starting');
     try {

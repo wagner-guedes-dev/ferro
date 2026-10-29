@@ -18,11 +18,13 @@ contextBridge.exposeInMainWorld('droid', {
     openFile: (opts) => invoke('dialog:openFile', opts),
   },
   meta: { all: () => invoke('meta:all') },
+  signals: { all: () => invoke('signals:all'), onSignal: (cb) => on('signal', cb) },
   update: { status: () => invoke('update:status'), check: () => invoke('update:check'), install: () => invoke('update:install'), onStatus: (cb) => on('update:status', cb) },
   sdk: {
     status: () => invoke('sdk:status'),
     java: () => invoke('sdk:java'),
     install: (opts) => invoke('sdk:install', opts),
+    webcams: () => invoke('sdk:webcams'),
     onLog: (cb) => on('sdk:log', cb),
   },
   groups: {

@@ -78,6 +78,9 @@ class EmulatorManager extends EventEmitter {
     if (opts.cold) args.push('-no-snapshot-load');
     if (profile.timezone) args.push('-timezone', profile.timezone);
     if (profile.locale) args.push('-change-locale', profile.locale.replace('_', '-'));
+    const cam = (v) => (typeof v === 'string' && /^(emulated|virtualscene|none|webcam\d+)$/.test(v) ? v : null);
+    if (cam(profile.cameraFront)) args.push('-camera-front', profile.cameraFront);
+    if (cam(profile.cameraBack)) args.push('-camera-back', profile.cameraBack);
     try {
       if (proxy) {
         // The emulator's network daemon (netsimd) survives emulator exits and only

@@ -342,6 +342,63 @@ test('browser launch args are isolated and proxied', () => {
   assert.strictEqual(detectBrowsers('/definitely/missing').find((b) => b.id === 'custom'), undefined);
 });
 
+test('signal quality classification', () => {
+  const { quality, summarize } = require('../src/main/signal');
+  const ok = (ms) => ({ ok: true, latency: ms, at: 1 });
+  const bad = () => ({ ok: false, latency: 8000, at: 1 });
+  assert.strictEqual(quality([]), 'unknown');
+  assert.strictEqual(quality([ok(100), ok(150)]), 'excellent');
+  assert.strictEqual(quality([ok(300), ok(250)]), 'good');
+  assert.strictEqual(quality([ok(700), ok(600)]), 'fair');
+  assert.strictEqual(quality([ok(100), bad(), ok(120)]), 'poor');
+  assert.strictEqual(quality([ok(100), bad()]), 'poor');
+  assert.strictEqual(quality([ok(100), bad(), bad()]), 'down');
+  const sm = summarize([ok(100), bad(), ok(300)]);
+  assert.strictEqual(sm.latency, 300); assert.strictEqual(sm.avg, 200); assert.strictEqual(sm.stability, 67);
+});
+
+test('pingProxy measures a round trip through the tunnel', async () => {
+  const { pingProxy } = require('../src/main/proxy');
+  const origin = await startOrigin();
+  // socks server that redirects any destination to our origin
+  const server = net.createServer((client) => {
+    let stage = 0;
+    client.on('data', (buf) => {
+      if (stage === 0) { client.write(Buffer.from([5, 0])); stage = 1; }
+      else if (stage === 1) { const up = net.connect(origin.port, '127.0.0.1', () => { client.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])); up.pipe(client); client.pipe(up); }); stage = 2; }
+    });
+    client.on('error', () => {});
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const r = await pingProxy({ type: 'socks5', host: '127.0.0.1', port: server.address().port });
+  assert.strictEqual(r.ok, true); assert.ok(r.latency >= 0 && r.latency < 5000);
+  const down = await pingProxy({ type: 'http', host: '127.0.0.1', port: 1 }, 3000);
+  assert.strictEqual(down.ok, false);
+  server.close(); origin.close();
+});
+
+test('store encrypts proxy passwords at rest with a codec', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dd-codec-'));
+  const file = path.join(dir, 'data.json');
+  const codec = { encrypt: (t) => `enc:${Buffer.from(t).toString('base64')}`, decrypt: (t) => Buffer.from(t.slice(4), 'base64').toString() };
+  const s = new Store(file, codec);
+  s.proxies.push({ id: 'a', password: 'secret1' });
+  s.profiles.push({ id: 'p', proxy: { password: 'secret2' } });
+  s.browsers.push({ id: 'b', proxy: { password: '' } });
+  s.save();
+  const raw = fs.readFileSync(file, 'utf8');
+  assert.ok(!raw.includes('secret1') && !raw.includes('secret2'));
+  assert.ok(raw.includes('enc:'));
+  const s2 = new Store(file, codec);
+  assert.strictEqual(s2.proxies[0].password, 'secret1');
+  assert.strictEqual(s2.profiles[0].proxy.password, 'secret2');
+  assert.strictEqual(s2.browsers[0].proxy.password, '');
+  // without a codec the encrypted value is kept untouched (not corrupted)
+  const s3 = new Store(file, null);
+  assert.ok(s3.proxies[0].password.startsWith('enc:'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('meta helpers', () => {
   assert.strictEqual(meta.androidVersionName(34), '14');
   assert.strictEqual(meta.androidVersionName(99), 'API 99');

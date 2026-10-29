@@ -273,6 +273,7 @@ function runSdkmanager(bin, sdkPath, args, log, java) {
 // Full installer: command-line tools -> platform-tools + emulator + system image.
 async function install({ sdkPath, api = 34, tag = 'google_apis', abi, javaHome }, log) {
   sdkPath = sdkPath || defaultSdkInstallPath();
+  if (/["\r\n]/.test(sdkPath)) throw new Error('INVALID_PATH');
   const java = await findJava(javaHome);
   if (!java) throw new Error('JAVA_MISSING');
   log(`Java encontrado: ${java.version} (${java.home || 'PATH'})`);
@@ -288,4 +289,19 @@ async function install({ sdkPath, api = 34, tag = 'google_apis', abi, javaHome }
   return getStatus(sdkPath);
 }
 
-module.exports = { getStatus, listSystemImages, install, findJava, defaultSdkInstallPath, IS_WIN, IS_MAC, exe };
+// Host webcams visible to the emulator ("emulator -webcam-list").
+function listWebcams(sdkStatus) {
+  return new Promise((resolve) => {
+    if (!sdkStatus || !sdkStatus.hasEmulator) return resolve([]);
+    execFile(sdkStatus.emulatorPath, ['-webcam-list'], { windowsHide: true, timeout: 20000, cwd: path.dirname(sdkStatus.emulatorPath) }, (err, stdout, stderr) => {
+      const text = `${stdout || ''}\n${stderr || ''}`;
+      const cams = [];
+      const re = /Camera '([^']+)' is connected to device '([^']*)'/g;
+      let m;
+      while ((m = re.exec(text))) cams.push({ id: m[1], device: m[2] });
+      resolve(cams);
+    });
+  });
+}
+
+module.exports = { listWebcams, getStatus, listSystemImages, install, findJava, defaultSdkInstallPath, IS_WIN, IS_MAC, exe };
