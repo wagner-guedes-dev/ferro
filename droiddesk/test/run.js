@@ -342,6 +342,41 @@ test('browser launch args are isolated and proxied', () => {
   assert.strictEqual(detectBrowsers('/definitely/missing').find((b) => b.id === 'custom'), undefined);
 });
 
+test('signal quality classification', () => {
+  const { quality, summarize } = require('../src/main/signal');
+  const ok = (ms) => ({ ok: true, latency: ms, at: 1 });
+  const bad = () => ({ ok: false, latency: 8000, at: 1 });
+  assert.strictEqual(quality([]), 'unknown');
+  assert.strictEqual(quality([ok(100), ok(150)]), 'excellent');
+  assert.strictEqual(quality([ok(300), ok(250)]), 'good');
+  assert.strictEqual(quality([ok(700), ok(600)]), 'fair');
+  assert.strictEqual(quality([ok(100), bad(), ok(120)]), 'poor');
+  assert.strictEqual(quality([ok(100), bad()]), 'poor');
+  assert.strictEqual(quality([ok(100), bad(), bad()]), 'down');
+  const sm = summarize([ok(100), bad(), ok(300)]);
+  assert.strictEqual(sm.latency, 300); assert.strictEqual(sm.avg, 200); assert.strictEqual(sm.stability, 67);
+});
+
+test('pingProxy measures a round trip through the tunnel', async () => {
+  const { pingProxy } = require('../src/main/proxy');
+  const origin = await startOrigin();
+  // socks server that redirects any destination to our origin
+  const server = net.createServer((client) => {
+    let stage = 0;
+    client.on('data', (buf) => {
+      if (stage === 0) { client.write(Buffer.from([5, 0])); stage = 1; }
+      else if (stage === 1) { const up = net.connect(origin.port, '127.0.0.1', () => { client.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0])); up.pipe(client); client.pipe(up); }); stage = 2; }
+    });
+    client.on('error', () => {});
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const r = await pingProxy({ type: 'socks5', host: '127.0.0.1', port: server.address().port });
+  assert.strictEqual(r.ok, true); assert.ok(r.latency >= 0 && r.latency < 5000);
+  const down = await pingProxy({ type: 'http', host: '127.0.0.1', port: 1 }, 3000);
+  assert.strictEqual(down.ok, false);
+  server.close(); origin.close();
+});
+
 test('meta helpers', () => {
   assert.strictEqual(meta.androidVersionName(34), '14');
   assert.strictEqual(meta.androidVersionName(99), 'API 99');

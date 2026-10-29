@@ -232,4 +232,24 @@ function parseProxyString(str) {
   return { type, host, port, username: username || '', password: password || '' };
 }
 
-module.exports = { openTunnel, startBridge, checkProxy, parseProxyString };
+/**
+ * Quick round-trip measurement through the proxy (HEAD generate_204).
+ */
+function pingProxy(proxy, timeout = 8000) {
+  const started = Date.now();
+  const host = 'connectivitycheck.gstatic.com';
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok) => { if (done) return; done = true; resolve({ ok, latency: Date.now() - started, at: Date.now() }); };
+    const timer = setTimeout(() => finish(false), timeout);
+    openTunnel(proxy, host, 80).then((sock) => {
+      sock.setTimeout(timeout, () => sock.destroy());
+      sock.on('data', (c) => { if (/^HTTP\/\d/.test(String(c))) { clearTimeout(timer); finish(true); sock.destroy(); } });
+      sock.on('error', () => { clearTimeout(timer); finish(false); });
+      sock.on('close', () => { clearTimeout(timer); finish(false); });
+      sock.write(`HEAD /generate_204 HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`);
+    }).catch(() => { clearTimeout(timer); finish(false); });
+  });
+}
+
+module.exports = { openTunnel, startBridge, checkProxy, parseProxyString, pingProxy };

@@ -29,6 +29,8 @@
     installing: false,
     installLog: [],
     update: { state: 'idle', version: null, percent: 0, error: '' },
+    signals: {},
+    webcams: null,
   };
 
   // ------------------------------------------------------------ helpers
@@ -98,6 +100,7 @@
       call(api.groups.list()), call(api.proxies.list()), call(api.profiles.list()), call(api.browsers.list()), call(api.browsers.detect()),
     ]);
     Object.assign(state, { info, settings, meta, sdk, groups, proxies, profiles, browsers, detectedBrowsers });
+    state.signals = await call(api.signals.all(), { silent: true }).catch(() => ({}));
     I18N.setLang(settings.language || 'pt-BR');
     state.viewMode = settings.viewMode === 'list' ? 'list' : 'grid';
     applyI18n();
@@ -148,13 +151,29 @@
       return true;
     });
   }
-  function proxyChip(p) {
+  function proxyChip(p, kind = 'profile') {
     const px = proxyOf(p);
     if (!px) return `<span class="chip lan">${esc(t('lan'))}</span><span class="sub">${esc(t('no_proxy'))}</span>`;
     const bad = px.lastCheck && px.lastCheck.ok === false;
     const label = `${px.type.toUpperCase()} ${px.host}:${px.port}`;
     const geo = px.lastCheck && px.lastCheck.ok ? ` · ${px.lastCheck.countryCode || ''} ${px.lastCheck.ip || ''}` : '';
-    return `<span class="chip proxy ${bad ? 'bad' : ''}">${esc(px.type.toUpperCase())}</span><span class="sub" title="${esc(label)}">${esc(px.host)}:${esc(px.port)}${esc(geo)}</span>`;
+    return `<span class="chip proxy ${bad ? 'bad' : ''}">${esc(px.type.toUpperCase())}</span><span class="sub" title="${esc(label)}">${esc(px.host)}:${esc(px.port)}${esc(geo)}</span>${signalHtml(p, kind, px)}`;
+  }
+  const QLEVEL = { excellent: 4, good: 3, fair: 2, poor: 1, down: 0 };
+  function levelFromLatency(ms) { return ms == null ? 0 : ms <= 200 ? 4 : ms <= 500 ? 3 : ms <= 1200 ? 2 : 1; }
+  function bars(level, extra, title) { return `<span class="sig q${level} ${extra}" title="${esc(title)}"><i></i><i></i><i></i><i></i></span>`; }
+  // Live signal while running (from the monitor) or last test when stopped.
+  function signalHtml(p, kind, px) {
+    const sig = state.signals[`${kind}:${p.id}`];
+    if (p.status !== 'stopped' && sig && sig.quality && sig.quality !== 'off') {
+      if (sig.quality === 'unknown') return bars(0, 'muted', t('sig_unknown'));
+      const level = QLEVEL[sig.quality] ?? 0;
+      const title = sig.quality === 'down' ? t('sig_tip_down') : t('sig_tip', { q: t(`sig_${sig.quality}`), ms: sig.latency ?? '-', avg: sig.avg ?? '-', st: sig.stability ?? '-' });
+      return bars(level, '', title) + `<span class="sig-text q${level}">${sig.latency != null ? `${sig.latency} ms` : esc(t(`sig_${sig.quality}`))}</span>`;
+    }
+    if (p.status !== 'stopped') return bars(0, 'muted', t('sig_unknown'));
+    if (px && px.lastCheck && px.lastCheck.ok && px.lastCheck.latency != null) return bars(levelFromLatency(px.lastCheck.latency), 'muted', t('sig_tip_last', { ms: px.lastCheck.latency }));
+    return '';
   }
   // Small warning when the proxy's detected country differs from the profile's country.
   function proxyGeoWarn(p) {
@@ -402,6 +421,14 @@
             <div class="field full"><label>${esc(t('f_device_name'))}</label><input class="input" id="pf-devname" value="${esc(v.deviceName)}" placeholder="Galaxy S23 de Ana"></div>
           </div>
         </div>
+        <div class="panel"><h4>${esc(t('cam_section'))}</h4>
+          <div class="hint" style="font-size:12px;color:var(--text-3)">${esc(t('cam_hint'))}</div>
+          <div class="form-grid">
+            <div class="field"><label>${esc(t('f_cam_front'))}</label><select class="select" id="pf-cam-front" data-val="${esc(v.cameraFront || 'emulated')}"></select></div>
+            <div class="field"><label>${esc(t('f_cam_back'))}</label><select class="select" id="pf-cam-back" data-val="${esc(v.cameraBack || 'virtualscene')}"></select></div>
+            <div class="field full"><div class="inline" style="align-items:center"><span class="hint" id="pf-cam-info" style="flex:1"></span><button class="btn outline sm" type="button" id="pf-cam-refresh">${esc(t('cam_refresh'))}</button></div></div>
+          </div>
+        </div>
         <div class="panel"><h4>${esc(t('f_country'))}</h4>
           <div class="hint" style="font-size:12px;color:var(--text-3)">${esc(t('country_hint'))}</div>
           <div class="form-grid">
@@ -432,6 +459,21 @@
       $('#pf-device', m).addEventListener('change', (e) => { const d = devices.find((x) => x.id === e.target.value); if (d) $('#pf-ram', m).value = d.ram; });
     }
     $('#pf-country', m).addEventListener('change', (e) => { const c = country(e.target.value); $('#pf-locale', m).value = c.locale; $('#pf-tz', m).value = c.timezone; });
+    const fillCams = () => {
+      const cams = state.webcams || [];
+      for (const id of ['#pf-cam-front', '#pf-cam-back']) {
+        const sel = $(id, m); if (!sel) return;
+        const cur = sel.value || sel.dataset.val;
+        const opts = [['emulated', t('cam_emulated')], ['virtualscene', t('cam_virtualscene')], ['none', t('cam_none')], ...cams.map((c) => [c.id, t('cam_webcam', { id: c.id })])];
+        if (cur && !opts.some((o) => o[0] === cur)) opts.push([cur, cur]);
+        sel.innerHTML = opts.map(([val, label]) => `<option value="${esc(val)}" ${val === cur ? 'selected' : ''}>${esc(label)}</option>`).join('');
+      }
+      const info = $('#pf-cam-info', m); if (info) info.textContent = cams.length ? cams.map((c) => `${c.id} = ${c.device}`).join(' · ') : t('cam_none_found');
+    };
+    fillCams();
+    const loadCams = async () => { state.webcams = await call(api.sdk.webcams(), { silent: true }).catch(() => []); fillCams(); };
+    if (state.webcams === null) loadCams();
+    $('#pf-cam-refresh', m).onclick = loadCams;
     $('#pf-cancel', m).onclick = () => closeModal();
     $('#pf', m).onsubmit = async (e) => {
       e.preventDefault();
@@ -442,6 +484,7 @@
         tags: $('#pf-tags', m).value.split(',').map((x) => x.trim()).filter(Boolean),
         country: $('#pf-country', m).value, locale: $('#pf-locale', m).value.trim(), timezone: $('#pf-tz', m).value.trim(),
         deviceName: $('#pf-devname', m).value, notes: $('#pf-notes', m).value,
+        cameraFront: $('#pf-cam-front', m).value, cameraBack: $('#pf-cam-back', m).value,
         proxyMode: mode, proxyId: mode === 'saved' ? $('#pf-proxy-id', m).value : null, proxy: mode === 'inline' ? { ...readProxyFields('pfx', m), lastCheck: m.__lastProxyCheck || (v.proxy && v.proxy.lastCheck) || null } : null,
       };
       if (!p) Object.assign(input, { deviceId: $('#pf-device', m).value, imageId: $('#pf-image', m).value, ram: $('#pf-ram', m).value, storage: $('#pf-storage', m).value });
@@ -570,7 +613,7 @@
       <div class="head"><input type="checkbox" class="checkbox sel" ${sel ? 'checked' : ''}><div class="title"><span class="num">${p.serial}.</span> ${esc(p.name)}</div>${statusBadge(p)}</div>
       <div class="row">${ICON_BROWSER}<span class="muted">${esc(browserName(p))}</span><span class="sub">· ${p.width}x${p.height}</span></div>
       <div class="row">${ICON.pin}${flag(p.country)}<span>${esc(country(p.country).name)}</span><span class="sub">· ${esc(p.timezone)}</span>${proxyGeoWarn(p)}</div>
-      <div class="row">${ICON.net}${proxyChip(p)}</div>
+      <div class="row">${ICON.net}${proxyChip(p, 'browser')}</div>
       <div class="row">${ICON.list}<span>${esc(groupName(p.groupId))}</span></div>
       <div class="row">${ICON.tag}<span class="tags">${p.tags.map((x) => `<span class="chip">${esc(x)}</span>`).join('') || '<span class="sub">--</span>'}</span></div>
       <div class="actions">${actionButtons(p)}<span class="sep"></span><button class="menu-btn" data-menu title="⋮">${ICON.dots}</button></div>
@@ -845,6 +888,8 @@
       <p>Todo tráfego do telefone passa pela ponte de proxy local do DroidDesk, que encaminha para o seu proxy (inclusive SOCKS5 com autenticação, que o emulador não suporta nativamente). Perfis sem proxy usam a rede do computador (<code>LAN</code>).</p>
       <h3>Requisitos</h3>
       <ul><li>Windows 10/11 64-bit, macOS ou Linux.</li><li>Virtualização ativada na BIOS (Intel VT-x / AMD-V).</li><li>No Windows: ative <b>Windows Hypervisor Platform</b> (Painel de Controle → Programas → Ativar ou desativar recursos do Windows).</li><li>8 GB de RAM ou mais (cada telefone usa 2–4 GB).</li></ul>
+      <h3>Câmera e compartilhamento de tela</h3>
+      <p>Nos perfis Android, escolha em <b>Câmera</b> se o telefone usa a câmera emulada, a cena virtual 3D ou uma <b>webcam do PC</b>. Para transmitir a tela do computador como se fosse a câmera, instale o <a href="https://obsproject.com" target="_blank">OBS Studio</a>, inicie a "Câmera Virtual" e selecione-a no perfil (aparece como webcam). Nos perfis de navegador, o site pede permissão e usa a webcam ou câmera virtual do PC diretamente.</p>
       <h3>Dicas</h3>
       <ul><li><b>Cold boot</b> (menu ⋮) reinicia o telefone do zero caso ele trave ao abrir.</li><li>Dê dois cliques no cartão para editar.</li><li>Os dados dos telefones ficam na pasta AVD (veja em Configurações). Faça backup dela se quiser preservar as contas.</li></ul>` : `
       <h3>How it works</h3>
@@ -855,6 +900,8 @@
       <p>All phone traffic goes through DroidDesk's local proxy bridge, which forwards to your proxy (including authenticated SOCKS5, which the emulator does not support natively). Profiles without a proxy use the computer's network (<code>LAN</code>).</p>
       <h3>Requirements</h3>
       <ul><li>Windows 10/11 64-bit, macOS or Linux.</li><li>Virtualization enabled in BIOS (Intel VT-x / AMD-V).</li><li>On Windows: enable <b>Windows Hypervisor Platform</b> (Control Panel → Programs → Turn Windows features on or off).</li><li>8 GB RAM or more (each phone uses 2–4 GB).</li></ul>
+      <h3>Camera and screen sharing</h3>
+      <p>In Android profiles, choose under <b>Camera</b> whether the phone uses the emulated camera, the 3D virtual scene or a <b>PC webcam</b>. To stream your screen as the camera, install <a href="https://obsproject.com" target="_blank">OBS Studio</a>, start its "Virtual Camera" and select it in the profile (it appears as a webcam). Browser profiles ask for permission and use the PC webcam or virtual camera directly.</p>
       <h3>Tips</h3>
       <ul><li><b>Cold boot</b> (⋮ menu) restarts the phone from scratch if it hangs on start.</li><li>Double-click a card to edit.</li><li>Phone data lives in the AVD folder (see Settings). Back it up to preserve accounts.</li></ul>`;
   }
@@ -892,6 +939,10 @@
     renderBrowsers();
   });
   api.browsers.onLog((e) => appendLog(e, 'browser'));
+  api.signals.onSignal((e) => {
+    if (e.quality === 'off') delete state.signals[e.key]; else state.signals[e.key] = e;
+    if (e.kind === 'browser') renderBrowsers(); else renderProfiles();
+  });
   $('#btn-new-proxy').onclick = () => openProxyModal(null);
   $('#btn-import-proxies').onclick = openImportModal;
   $('#btn-check-all').onclick = async () => { for (const x of state.proxies) { try { await call(api.proxies.check(x.id), { silent: true }); } catch (_) { /* ignore */ } } await reloadProxies(); renderProfiles(); };

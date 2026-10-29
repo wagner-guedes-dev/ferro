@@ -34,8 +34,9 @@ const MOCK = `
     shell: { openExternal: (u) => { rec('openExternal', u); return ok(true); }, openPath: (p) => { rec('openPath', p); return ok(''); } },
     dialog: { pickFolder: () => ok('D:\\\\sdk'), saveFile: (o) => { rec('saveFile', o.defaultPath); return ok('D:\\\\out.json'); }, openFile: () => ok(null) },
     meta: { all: () => ok(__META__) },
+    signals: { all: () => ok({}), onSignal: on('signal') },
     update: { status: () => ok({ state: 'idle', version: null, percent: 0, error: '' }), check: () => { setTimeout(() => window.__emit('update:status', { state: 'downloaded', version: '9.9.9', percent: 100, error: '' }), 30); return ok({ state: 'checking' }); }, install: () => { rec('update.install'); return ok(true); }, onStatus: on('update:status') },
-    sdk: { status: () => ok(sdk), java: () => ok({ bin: 'java', version: '17.0.9' }), install: () => { rec('install'); window.__emit('sdk:log', 'linha de log'); return ok(sdk); }, onLog: on('sdk:log') },
+    sdk: { status: () => ok(sdk), java: () => ok({ bin: 'java', version: '17.0.9' }), webcams: () => ok([{ id: 'webcam0', device: 'Integrated Camera' }]), install: () => { rec('install'); window.__emit('sdk:log', 'linha de log'); return ok(sdk); }, onLog: on('sdk:log') },
     groups: {
       list: () => ok(state.groups),
       create: (name) => { if (!name.trim()) return fail('INVALID_NAME'); const g = { id: 'g' + Date.now(), name }; state.groups.push(g); return ok(g); },
@@ -119,6 +120,12 @@ const MOCK = `
   // 3. start / stop a profile from card
   await page.locator('.card[data-id="p1"] [data-act="start"]').click();
   await page.waitForSelector('.card[data-id="p1"] .status.running');
+  await page.evaluate(() => window.__emit('signal', { key: 'profile:p1', kind: 'profile', profileId: 'p1', quality: 'good', latency: 230, avg: 240, stability: 100, samples: 3 }));
+  await page.waitForSelector('.card[data-id="p1"] .sig.q3');
+  assert.ok((await page.locator('.card[data-id="p1"] .sig-text').innerText()).includes('230'));
+  await page.evaluate(() => window.__emit('signal', { key: 'profile:p1', kind: 'profile', profileId: 'p1', quality: 'down', latency: null, avg: null, stability: 0, samples: 3 }));
+  await page.waitForSelector('.card[data-id="p1"] .sig.q0');
+  await page.evaluate(() => window.__emit('signal', { key: 'profile:p1', kind: 'profile', profileId: 'p1', quality: 'off' }));
   await page.locator('.card[data-id="p1"] [data-act="stop"]').click();
   await page.waitForSelector('.card[data-id="p1"] .status.stopped');
 
@@ -163,6 +170,8 @@ const MOCK = `
   assert.strictEqual(await page.inputValue('#pf-tz'), 'America/Sao_Paulo');
   await shot('04-new-profile');
   await page.fill('#pf-tags', 'uk, teste');
+  await page.waitForFunction(() => [...document.querySelectorAll('#pf-cam-front option')].some((o) => o.value === 'webcam0'));
+  await page.selectOption('#pf-cam-back', 'webcam0');
   await page.locator('#pf-save').click();
   await page.waitForSelector('.card[data-id^="p"]:nth-child(4)');
   assert.strictEqual(await page.locator('.card').count(), 4);
@@ -173,6 +182,8 @@ const MOCK = `
   assert.strictEqual(created.country, 'BR');
   assert.deepStrictEqual(created.tags, ['uk', 'teste']);
   assert.strictEqual(created.imageId, 'system-images;android-34;google_apis;x86_64');
+  assert.strictEqual(created.cameraBack, 'webcam0');
+  assert.strictEqual(created.cameraFront, 'emulated');
 
   // 7. edit (double click) keeps hardware locked
   await page.locator('.card[data-id="p2"] .title').dblclick();

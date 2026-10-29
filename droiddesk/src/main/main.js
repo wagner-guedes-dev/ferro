@@ -10,11 +10,14 @@ const meta = require('./meta');
 const { EmulatorManager } = require('./emulator');
 const { setupUpdater } = require('./updater');
 const browsers = require('./browsers');
+const { SignalMonitor } = require('./signal');
 
 let win = null;
 let store = null;
 const emu = new EmulatorManager();
 const bm = new browsers.BrowserManager();
+const signal = new SignalMonitor();
+signal.on('signal', (e) => send('signal', e));
 let sdkStatus = null;
 let updater = null;
 
@@ -64,15 +67,23 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
+function syncSignal(kind, mgr, e) {
+  const key = `${kind}:${e.profileId}`;
+  const inst = mgr.instances.get(e.profileId);
+  if (e.status === 'running' && inst && inst.proxy) signal.track(key, { kind, profileId: e.profileId, proxy: inst.proxy });
+  else if (e.status === 'stopped') signal.untrack(key);
+}
 emu.on('status', (e) => {
   const p = store.profiles.find((x) => x.id === e.profileId);
   if (p && e.status === 'running') { p.lastStartedAt = new Date().toISOString(); store.save(); }
+  syncSignal('profile', emu, e);
   send('profile:status', e);
 });
 emu.on('log', (e) => send('profile:log', e));
 bm.on('status', (e) => {
   const p = store.browsers.find((x) => x.id === e.profileId);
   if (p && e.status === 'running') { p.lastStartedAt = new Date().toISOString(); store.save(); }
+  syncSignal('browser', bm, e);
   send('browser:status', e);
 });
 bm.on('log', (e) => send('browser:log', e));
@@ -88,6 +99,7 @@ app.on('before-quit', async (e) => {
   const anyBrowser = [...bm.instances.values()].some((i) => i.status !== 'stopped');
   if (anyEmu || anyBrowser) {
     e.preventDefault();
+    signal.stopAll();
     await Promise.all([emu.stopAll(), bm.stopAll()]);
     app.exit(0);
   }
@@ -178,6 +190,8 @@ handle('meta:all', () => ({ devices: meta.DEVICES, countries: meta.COUNTRIES, ve
 // ---------- sdk ----------
 handle('sdk:status', () => refreshSdk());
 handle('sdk:java', () => sdk.findJava(store.settings.javaHome));
+handle('sdk:webcams', () => sdk.listWebcams(sdkStatus));
+handle('signals:all', () => signal.all());
 let installing = false;
 handle('sdk:install', async (opts) => {
   if (installing) throw new Error('INSTALL_RUNNING');
@@ -290,6 +304,8 @@ function validateProfileInput(input, existing) {
     timezone: String(input.timezone || country.timezone),
     deviceName: String(input.deviceName || '').trim(),
     notes: String(input.notes || ''),
+    cameraFront: /^(emulated|virtualscene|none|webcam\d+)$/.test(String(input.cameraFront || '')) ? String(input.cameraFront) : 'emulated',
+    cameraBack: /^(emulated|virtualscene|none|webcam\d+)$/.test(String(input.cameraBack || '')) ? String(input.cameraBack) : 'virtualscene',
     proxyMode: ['none', 'saved', 'inline'].includes(input.proxyMode) ? input.proxyMode : 'none',
     proxyId: null,
     proxy: null,
