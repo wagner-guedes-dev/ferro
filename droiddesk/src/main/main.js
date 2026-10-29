@@ -11,13 +11,15 @@ const { EmulatorManager } = require('./emulator');
 const { setupUpdater } = require('./updater');
 const browsers = require('./browsers');
 const { SignalMonitor } = require('./signal');
+const { HudManager } = require('./hud');
 
 let win = null;
 let store = null;
 const emu = new EmulatorManager();
 const bm = new browsers.BrowserManager();
 const signal = new SignalMonitor();
-signal.on('signal', (e) => send('signal', e));
+let hud = null;
+signal.on('signal', (e) => { send('signal', e); if (hud && e.quality !== 'off') hud.update(e.key, e); });
 let sdkStatus = null;
 let updater = null;
 
@@ -40,6 +42,11 @@ function boot() {
   Menu.setApplicationMenu(null);
   createWindow();
   updater = setupUpdater({ send, getWindow: () => win });
+  hud = new HudManager({
+    getLang: () => store.settings.language || 'pt-BR',
+    getOffset: (key) => (store.settings.hudOffsets || {})[key] || null,
+    setOffset: (key, value) => { store.settings.hudOffsets = { ...(store.settings.hudOffsets || {}), [key]: value }; store.save(); },
+  });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
@@ -76,8 +83,16 @@ function send(channel, payload) {
 function syncSignal(kind, mgr, e) {
   const key = `${kind}:${e.profileId}`;
   const inst = mgr.instances.get(e.profileId);
-  if (e.status === 'running' && inst && inst.proxy) signal.track(key, { kind, profileId: e.profileId, proxy: inst.proxy });
-  else if (e.status === 'stopped') signal.untrack(key);
+  if (e.status === 'running' && inst && inst.proxy) {
+    signal.track(key, { kind, profileId: e.profileId, proxy: inst.proxy });
+    const p = (kind === 'browser' ? store.browsers : store.profiles).find((x) => x.id === e.profileId);
+    if (hud && p && store.settings.proxyHud !== false) {
+      hud.show(key, { name: p.name, kind, title: kind === 'profile' ? `${p.avdId}:${p.port}` : '', proxyLabel: `${inst.proxy.type.toUpperCase()} ${inst.proxy.host}:${inst.proxy.port}` });
+    }
+  } else if (e.status === 'stopped') {
+    signal.untrack(key);
+    if (hud) hud.hide(key);
+  }
 }
 emu.on('status', (e) => {
   const p = store.profiles.find((x) => x.id === e.profileId);
@@ -106,6 +121,7 @@ app.on('before-quit', async (e) => {
   if (anyEmu || anyBrowser) {
     e.preventDefault();
     signal.stopAll();
+    if (hud) hud.hideAll();
     await Promise.all([emu.stopAll(), bm.stopAll()]);
     app.exit(0);
   }
@@ -173,6 +189,7 @@ handle('settings:set', (patch) => {
   patch = asObj(patch);
   const allowed = {};
   for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode', 'javaHome', 'browserPath']) if (k in patch) allowed[k] = asStr(patch[k], 1024).trim();
+  if ('proxyHud' in patch) { allowed.proxyHud = !!patch.proxyHud; if (!allowed.proxyHud && hud) hud.hideAll(); }
   if ('language' in allowed && !['pt-BR', 'en'].includes(allowed.language)) delete allowed.language;
   if ('viewMode' in allowed && !['grid', 'list'].includes(allowed.viewMode)) delete allowed.viewMode;
   for (const k of ['sdkPath', 'avdHome', 'javaHome', 'browserPath']) if (k in allowed && /["\r\n]/.test(allowed[k])) throw new Error('INVALID_PATH');
