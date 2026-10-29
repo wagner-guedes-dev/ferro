@@ -122,7 +122,9 @@ class EmulatorManager extends EventEmitter {
       });
       child.on('exit', (code, signal) => {
         this._log(inst, `Emulador encerrado (code=${code} signal=${signal || ''})`);
-        const detail = inst.status === 'stopping' || code === 0 ? '' : this._diagnose(inst);
+        // Only an exit *before boot finished* is a failure worth diagnosing. An exit
+        // while running means the user closed the phone window (or we stopped it).
+        const detail = inst.status === 'starting' && code !== 0 ? this._diagnose(inst) : '';
         this._cleanup(inst, detail);
       });
       this._waitBoot(inst, profile).catch(() => { /* handled inside */ });
@@ -135,7 +137,7 @@ class EmulatorManager extends EventEmitter {
 
   _diagnose(inst) {
     const text = inst.log.join('\n');
-    if (/HAXM|WHPX|hypervisor|KVM|accel|Hyper-V|x86 emulation currently requires hardware acceleration/i.test(text)) return 'NO_ACCEL';
+    if (/x86 emulation currently requires hardware acceleration|HAXM is not installed|WHPX is not available|Hypervisor.*not (installed|available|operational)|failed to initialize (HAX|WHPX|KVM)|hypervisor compatibility.*(fail|not met)|CPU acceleration status/i.test(text)) return 'NO_ACCEL';
     if (/Cannot find AVD|Unknown AVD name/i.test(text)) return 'AVD_MISSING';
     if (/system image|system\.img|No system image/i.test(text)) return 'IMAGE_MISSING';
     if (/already running|Running multiple emulators with the same AVD/i.test(text)) return 'AVD_BUSY';
@@ -211,12 +213,12 @@ class EmulatorManager extends EventEmitter {
     if (!inst || inst.status === 'stopped') return;
     this._set(inst, 'stopping');
     const serial = `emulator-${inst.port}`;
-    try { await this.adb(['-s', serial, 'emu', 'kill'], { timeout: 8000 }); } catch (_) { /* fall through */ }
-    const exited = await this._waitExit(inst, 12000);
+    try { await this.adb(['-s', serial, 'emu', 'kill'], { timeout: 5000 }); } catch (_) { /* fall through */ }
+    const exited = await this._waitExit(inst, 6000);
     if (!exited && inst.child) {
       this._log(inst, 'Forçando encerramento...');
       killTree(inst.child);
-      await this._waitExit(inst, 8000);
+      await this._waitExit(inst, 4000);
     }
     if (inst.status !== 'stopped') await this._cleanup(inst, '');
   }
