@@ -253,6 +253,8 @@ function runSdkmanager(bin, sdkPath, args, log, java) {
       ? spawn(`"${bin}"`, allArgs.map((a) => `"${a}"`), { env, windowsHide: true, shell: true })
       : spawn(bin, allArgs, { env, windowsHide: true });
     child.stdin.on('error', () => { /* process may exit before we finish writing */ });
+    child.stdout.on('error', () => {});
+    child.stderr.on('error', () => {});
     let out = '';
     const feed = (chunk) => {
       const text = String(chunk);

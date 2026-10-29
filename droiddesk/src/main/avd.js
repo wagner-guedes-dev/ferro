@@ -106,11 +106,16 @@ function updateDisplayName(avdId, displayName, home) {
   fs.writeFileSync(file, lines.filter(Boolean).join('\n') + '\n', 'utf8');
 }
 
-function deleteAvd(avdId, home) {
+// Asynchronous so a multi-GB phone never blocks the UI. The emulator may still
+// hold file locks for a moment after exiting (Windows), hence the retries.
+async function deleteAvd(avdId, home) {
   const h = avdHome(home);
-  // The emulator may still hold file locks for a moment after exiting (Windows).
-  fs.rmSync(path.join(h, `${avdId}.avd`), { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-  fs.rmSync(path.join(h, `${avdId}.ini`), { force: true, maxRetries: 10, retryDelay: 300 });
+  await fs.promises.rm(path.join(h, `${avdId}.avd`), { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
+  await fs.promises.rm(path.join(h, `${avdId}.ini`), { force: true, maxRetries: 12, retryDelay: 250 });
+}
+
+function avdLocked(avdId, home) {
+  return fs.existsSync(path.join(avdHome(home), `${avdId}.avd`, 'hardware-qemu.ini.lock'));
 }
 
 function avdExists(avdId, home) {
@@ -133,4 +138,4 @@ function avdSizeBytes(avdId, home) {
   return total;
 }
 
-module.exports = { avdHome, createAvd, deleteAvd, avdExists, updateDisplayName, avdSizeBytes };
+module.exports = { avdHome, createAvd, deleteAvd, avdExists, avdLocked, updateDisplayName, avdSizeBytes };

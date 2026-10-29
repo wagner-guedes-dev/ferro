@@ -266,7 +266,7 @@ test('store persists atomically and allocates ports', () => {
 });
 
 // ---------- avd ----------
-test('avd create/update/delete writes correct ini files', () => {
+test('avd create/update/delete writes correct ini files', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dd-avd-'));
   const image = { id: 'system-images;android-34;google_apis;x86_64', platform: 'android-34', tag: 'google_apis', abi: 'x86_64', api: 34, tagDisplay: 'Google APIs', sysdir: 'system-images/android-34/google_apis/x86_64/', playStore: false };
   const device = meta.findDevice('galaxy_s23');
@@ -287,7 +287,8 @@ test('avd create/update/delete writes correct ini files', () => {
   assert.ok(cfg2.includes('avd.ini.displayname=Novo nome'));
   assert.ok(!cfg2.includes('displayname=Teste'));
   assert.ok(avd.avdSizeBytes('droiddesk_test', home) > 0);
-  avd.deleteAvd('droiddesk_test', home);
+  assert.strictEqual(avd.avdLocked('droiddesk_test', home), false);
+  await avd.deleteAvd('droiddesk_test', home);
   assert.ok(!avd.avdExists('droiddesk_test', home));
   // arm64 image -> arm64 cpu arch
   avd.createAvd({ avdId: 'arm', displayName: 'arm', image: { ...image, abi: 'arm64-v8a' }, device, home });
