@@ -44,6 +44,7 @@
   }
   function errMsg(code) {
     if (!code) return t('err_UNKNOWN');
+    if (String(code).startsWith('DELETE_PARTIAL:')) return t('err_DELETE_PARTIAL', { names: String(code).slice(15) });
     const key = `err_${String(code).replace(/^.*?(E[A-Z]+).*$/, '$1')}`;
     const direct = `err_${code}`;
     if (t(direct) !== direct) return t(direct);
@@ -257,19 +258,22 @@
   }
   async function deleteProfiles(ids) {
     if (!ids.length) return;
-    if (!(await confirmModal(t('confirm_delete_profiles', { n: ids.length }), t('yes_delete'), true))) return;
+    const names = ids.map((id) => { const p = state.profiles.find((x) => x.id === id); return p ? `${p.serial}. ${p.name}${p.status !== 'stopped' ? ` (${t(`status_${p.status}`)})` : ''}` : id; });
+    if (!(await confirmModal(t('confirm_delete_profiles', { n: ids.length }), t('yes_delete'), true, { names, ack: t('delete_ack') }))) return;
     try { await call(api.profiles.delete(ids)); ids.forEach((id) => state.selected.delete(id)); toast(t('toast_deleted'), 'ok'); await reloadProfiles(); } catch (_) { /* shown */ }
   }
+  const checking = new Set();
   async function checkProfileProxy(id) {
     const p = state.profiles.find((x) => x.id === id);
-    if (!p) return;
+    if (!p || checking.has(id)) return;
+    checking.add(id);
     try {
       const r = await call(api.profiles.checkProxy(id));
       if (r.direct) toast(t('toast_direct'), 'warn');
       else if (r.ok) toast(`${p.name}: ${t('toast_proxy_ok', { ip: r.ip, country: r.country, ms: r.latency })}`, 'ok');
       else toast(`${p.name}: ${t('toast_proxy_fail', { err: errMsg(r.error) })}`, 'err');
       state.proxies = await call(api.proxies.list()); renderProfiles(); renderProxies();
-    } catch (_) { /* shown */ }
+    } catch (_) { /* shown */ } finally { checking.delete(id); }
   }
   async function exportProfiles(ids) {
     try {
@@ -278,15 +282,21 @@
       if (path) toast(t('toast_exported', { path }), 'ok');
     } catch (_) { /* shown */ }
   }
+  let bulkBusy = false;
+  function setToolbarBusy(selector, busy) { $$(`${selector} .btn`).forEach((b) => { b.disabled = busy; }); }
   async function bulk(action) {
+    if (bulkBusy) return;
     const ids = [...state.selected];
     if (action === 'export') return exportProfiles(ids);
     if (!ids.length) { toast(t('selected', { n: 0 }), 'warn'); return; }
-    if (action === 'start') { for (const id of ids) await startProfile(id); }
-    else if (action === 'stop') { await Promise.all(ids.map((id) => stopProfile(id))); }
-    else if (action === 'delete') { await deleteProfiles(ids); }
-    else if (action === 'move') { await openMoveModal(ids); }
-    else if (action === 'checkproxy') { for (const id of ids) await checkProfileProxy(id); }
+    bulkBusy = true; setToolbarBusy('#view-profiles .toolbar', true);
+    try {
+      if (action === 'start') { for (const id of ids) await startProfile(id); }
+      else if (action === 'stop') { await Promise.all(ids.map((id) => stopProfile(id))); }
+      else if (action === 'delete') { await deleteProfiles(ids); }
+      else if (action === 'move') { await openMoveModal(ids); }
+      else if (action === 'checkproxy') { for (const id of ids) await checkProfileProxy(id); }
+    } finally { bulkBusy = false; setToolbarBusy('#view-profiles .toolbar', false); }
   }
 
   // ------------------------------------------------------------ context menu
@@ -336,15 +346,23 @@
     const first = $('input:not([type=checkbox]):not([type=radio]),select,textarea', m); if (first) setTimeout(() => first.focus(), 30);
     return m;
   }
-  function closeModal() { $('#modal-bg').classList.remove('open'); $('#modal').innerHTML = ''; state.logsOpenFor = null; if (modalResolve) { const r = modalResolve; modalResolve = null; r(false); } }
+  function setModalBusy(m, busy) { if (busy) m.dataset.busy = '1'; else delete m.dataset.busy; }
+  function closeModal(force) {
+    if (!force && $('#modal').dataset.busy) return; // a save is in flight: ignore Escape/backdrop
+    $('#modal-bg').classList.remove('open'); $('#modal').innerHTML = ''; delete $('#modal').dataset.busy; state.logsOpenFor = null;
+    if (modalResolve) { const r = modalResolve; modalResolve = null; r(false); }
+  }
   $('#modal-bg').addEventListener('mousedown', (e) => { if (e.target === e.currentTarget && !state.installing) closeModal(); });
-  function confirmModal(text, okLabel, danger) {
+  function confirmModal(text, okLabel, danger, { names = null, ack = null } = {}) {
     return new Promise((resolve) => {
       modalResolve = resolve;
-      const m = openModal(`<div class="m-head"><h3>${esc(t('confirm'))}</h3></div><div class="m-body"><p style="margin:0;line-height:1.5">${esc(text)}</p></div>
-        <div class="m-foot"><button class="btn outline" data-x="cancel">${esc(t('cancel'))}</button><button class="btn ${danger ? 'danger outline' : 'primary'}" data-x="ok">${esc(okLabel || t('confirm'))}</button></div>`, { size: 'sm' });
+      const list = names && names.length ? `<ul style="margin:10px 0 0;padding-left:20px;line-height:1.6;max-height:160px;overflow:auto">${names.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '';
+      const ackHtml = ack ? `<label style="display:flex;gap:10px;align-items:flex-start;margin-top:14px;cursor:pointer"><input type="checkbox" class="checkbox" id="cf-ack" style="margin-top:2px"><span style="font-size:13px;color:var(--text-2)">${esc(ack)}</span></label>` : '';
+      const m = openModal(`<div class="m-head"><h3>${esc(t('confirm'))}</h3></div><div class="m-body"><p style="margin:0;line-height:1.5">${esc(text)}</p>${list}${ackHtml}</div>
+        <div class="m-foot"><button class="btn outline" data-x="cancel">${esc(t('cancel'))}</button><button class="btn ${danger ? 'danger outline' : 'primary'}" data-x="ok" ${ack ? 'disabled' : ''}>${esc(okLabel || t('confirm'))}</button></div>`, { size: 'sm' });
       $('[data-x="cancel"]', m).onclick = () => closeModal();
-      $('[data-x="ok"]', m).onclick = () => { modalResolve = null; closeModal(); resolve(true); };
+      if (ack) $('#cf-ack', m).addEventListener('change', (e) => { $('[data-x="ok"]', m).disabled = !e.target.checked; });
+      $('[data-x="ok"]', m).onclick = () => { if (ack && !$('#cf-ack', m).checked) return; modalResolve = null; closeModal(); resolve(true); };
     });
   }
   function proxyFields(prefix, v = {}) {
@@ -413,6 +431,7 @@
         </div>
         <div class="panel"><h4>${esc(t('f_device'))}</h4>
           ${p ? `<div class="hint">${esc(t('hw_locked'))}</div>` : ''}
+          ${p && p.status !== 'stopped' ? `<div class="note warn">${esc(t('edit_running_hint'))}</div>` : ''}
           <div class="form-grid">
             <div class="field"><label>${esc(t('f_device'))}</label><select class="select" id="pf-device" ${p ? 'disabled' : ''}>${p ? `<option>${esc(p.device.manufacturer)} ${esc(p.device.model)}</option>` : devices.map((d) => `<option value="${d.id}">${esc(d.name)} · ${d.width}x${d.height}</option>`).join('')}</select></div>
             <div class="field"><label>${esc(t('f_image'))}</label><select class="select" id="pf-image" ${p ? 'disabled' : ''}>${p ? `<option>Android ${esc(p.androidVersion)} (${esc(p.abi)})</option>` : images.map((i) => `<option value="${esc(i.id)}">Android ${esc(state.meta.versions[i.api] || i.api)} (API ${i.api}) · ${esc(i.tagDisplay)} · ${esc(i.abi)}</option>`).join('')}</select></div>
@@ -477,7 +496,7 @@
     $('#pf-cancel', m).onclick = () => closeModal();
     $('#pf', m).onsubmit = async (e) => {
       e.preventDefault();
-      const btn = $('#pf-save', m); btn.disabled = true; btn.textContent = p ? t('saving') : t('creating');
+      const btn = $('#pf-save', m); btn.disabled = true; btn.textContent = p ? t('saving') : t('creating'); setModalBusy(m, true);
       const mode = $('input[name="pf-pmode"]:checked', m).value;
       const input = {
         name: $('#pf-name', m).value, groupId: $('#pf-group', m).value || null,
@@ -490,8 +509,8 @@
       if (!p) Object.assign(input, { deviceId: $('#pf-device', m).value, imageId: $('#pf-image', m).value, ram: $('#pf-ram', m).value, storage: $('#pf-storage', m).value });
       try {
         if (p) await call(api.profiles.update(p.id, input)); else await call(api.profiles.create(input));
-        closeModal(); toast(t('toast_saved'), 'ok'); await reloadProfiles();
-      } catch (_) { btn.disabled = false; btn.textContent = p ? t('save') : t('create'); }
+        setModalBusy(m, false); closeModal(); toast(t('toast_saved'), 'ok'); await reloadProfiles();
+      } catch (_) { setModalBusy(m, false); btn.disabled = false; btn.textContent = p ? t('save') : t('create'); }
     };
   }
 
@@ -634,7 +653,8 @@
   }
   async function deleteBrowsers(ids) {
     if (!ids.length) return;
-    if (!(await confirmModal(t('confirm_delete_profiles', { n: ids.length }), t('yes_delete'), true))) return;
+    const names = ids.map((id) => { const p = state.browsers.find((x) => x.id === id); return p ? `${p.serial}. ${p.name}` : id; });
+    if (!(await confirmModal(t('confirm_delete_browsers', { n: ids.length }), t('yes_delete'), true, { names, ack: t('delete_ack') }))) return;
     try { await call(api.browsers.delete(ids)); ids.forEach((id) => state.bselected.delete(id)); toast(t('toast_deleted'), 'ok'); await reloadBrowsers(); } catch (_) { /* shown */ }
   }
   async function checkBrowserProxy(id) {
@@ -648,13 +668,17 @@
     } catch (_) { /* shown */ }
   }
   async function bulkBrowsers(action) {
+    if (bulkBusy) return;
     const ids = [...state.bselected];
     if (!ids.length) { toast(t('selected', { n: 0 }), 'warn'); return; }
-    if (action === 'start') { for (const id of ids) await startBrowser(id); }
-    else if (action === 'stop') { await Promise.all(ids.map((id) => stopBrowser(id))); }
-    else if (action === 'delete') { await deleteBrowsers(ids); }
-    else if (action === 'move') { await openMoveModal(ids, 'browser'); }
-    else if (action === 'checkproxy') { for (const id of ids) await checkBrowserProxy(id); }
+    bulkBusy = true; setToolbarBusy('#view-browsers .toolbar', true);
+    try {
+      if (action === 'start') { for (const id of ids) await startBrowser(id); }
+      else if (action === 'stop') { await Promise.all(ids.map((id) => stopBrowser(id))); }
+      else if (action === 'delete') { await deleteBrowsers(ids); }
+      else if (action === 'move') { await openMoveModal(ids, 'browser'); }
+      else if (action === 'checkproxy') { for (const id of ids) await checkBrowserProxy(id); }
+    } finally { bulkBusy = false; setToolbarBusy('#view-browsers .toolbar', false); }
   }
   function openBrowserMenu(anchor, id) {
     const p = state.browsers.find((x) => x.id === id); if (!p) return;
@@ -726,7 +750,7 @@
     $('#bf-cancel', m).onclick = () => closeModal();
     $('#bf', m).onsubmit = async (e) => {
       e.preventDefault();
-      const btn = $('#bf-save', m); btn.disabled = true; btn.textContent = p ? t('saving') : t('creating');
+      const btn = $('#bf-save', m); btn.disabled = true; btn.textContent = p ? t('saving') : t('creating'); setModalBusy(m, true);
       const mode = $('input[name="pf-pmode"]:checked', m).value;
       const input = {
         name: $('#bf-name', m).value, groupId: $('#bf-group', m).value || null,
@@ -738,8 +762,8 @@
       };
       try {
         if (p) await call(api.browsers.update(p.id, input)); else await call(api.browsers.create(input));
-        closeModal(); toast(t('toast_saved'), 'ok'); await reloadBrowsers();
-      } catch (_) { btn.disabled = false; btn.textContent = p ? t('save') : t('create'); }
+        setModalBusy(m, false); closeModal(); toast(t('toast_saved'), 'ok'); await reloadBrowsers();
+      } catch (_) { setModalBusy(m, false); btn.disabled = false; btn.textContent = p ? t('save') : t('create'); }
     };
   }
 
@@ -780,7 +804,9 @@
     $('#pxf', m).onsubmit = async (e) => {
       e.preventDefault();
       const input = { name: $('#px-name', m).value, ...readProxyFields('px', m), resetCheck: true };
-      try { if (x) await call(api.proxies.update(x.id, input)); else await call(api.proxies.create(input)); closeModal(); toast(t('toast_saved'), 'ok'); await reloadProxies(); renderProfiles(); } catch (_) { /* shown */ }
+      const btn = $('#px-save', m); btn.disabled = true; setModalBusy(m, true);
+      try { if (x) await call(api.proxies.update(x.id, input)); else await call(api.proxies.create(input)); setModalBusy(m, false); closeModal(); toast(t('toast_saved'), 'ok'); await reloadProxies(); renderProfiles(); renderBrowsers(); }
+      catch (_) { setModalBusy(m, false); btn.disabled = false; }
     };
   }
   function openImportModal() {
@@ -808,7 +834,7 @@
       </div></div>
       <div class="panel"><h4>${esc(t('sdk_section'))}</h4>
         <div class="kv">
-          <div class="k">${esc(t('sdk_path'))}</div><div class="v"><input class="input" id="st-sdk" value="${esc(s.sdkPath)}" style="flex:1"><button class="btn outline sm" id="st-browse">${esc(t('browse'))}</button><button class="btn primary sm" id="st-save-sdk">${esc(t('save_path'))}</button></div>
+          <div class="k">${esc(t('sdk_path'))}</div><div class="v"><input class="input" id="st-sdk" value="${esc(s.sdkPath)}" style="flex:1"><button class="btn outline sm" id="st-browse" ${state.installing ? 'disabled' : ''}>${esc(t('browse'))}</button><button class="btn primary sm" id="st-save-sdk" ${state.installing ? 'disabled' : ''}>${esc(t('save_path'))}</button></div>
           <div class="k">${esc(t('sdk_emulator'))}</div><div class="v">${yesno(s.hasEmulator, s.hasEmulator ? t('found') : t('not_found'))}<span style="color:var(--text-3);font-size:12px">${esc(s.emulatorPath)}</span></div>
           <div class="k">${esc(t('sdk_adb'))}</div><div class="v">${yesno(s.hasAdb, s.hasAdb ? t('found') : t('not_found'))}<span style="color:var(--text-3);font-size:12px">${esc(s.adbPath)}</span></div>
           <div class="k">${esc(t('sdk_images'))}</div><div class="v" style="flex-wrap:wrap">${s.images.length ? s.images.map((i) => `<span class="chip">Android ${esc(state.meta.versions[i.api] || i.api)} · ${esc(i.tagDisplay)} · ${esc(i.abi)}</span>`).join('') : yesno(false, t('not_found'))}</div>
@@ -945,7 +971,13 @@
   });
   $('#btn-new-proxy').onclick = () => openProxyModal(null);
   $('#btn-import-proxies').onclick = openImportModal;
-  $('#btn-check-all').onclick = async () => { for (const x of state.proxies) { try { await call(api.proxies.check(x.id), { silent: true }); } catch (_) { /* ignore */ } } await reloadProxies(); renderProfiles(); };
+  let checkingAll = false;
+  $('#btn-check-all').onclick = async () => {
+    if (checkingAll) return;
+    checkingAll = true; const b = $('#btn-check-all'); b.disabled = true;
+    try { for (const x of state.proxies) { try { await call(api.proxies.check(x.id), { silent: true }); } catch (_) { /* ignore */ } } await reloadProxies(); renderProfiles(); renderBrowsers(); }
+    finally { checkingAll = false; b.disabled = false; }
+  };
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') { if (state.view === 'profiles') { e.preventDefault(); openProfileModal(null); } else if (state.view === 'browsers') { e.preventDefault(); openBrowserModal(null); } } });
 
   api.profiles.onStatus((e) => {

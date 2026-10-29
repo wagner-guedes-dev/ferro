@@ -108,6 +108,17 @@ droiddesk/
 └─ test/            # testes
 ```
 
+## Segurança e integridade dos dados
+
+- Renderer isolado (`contextIsolation`, `sandbox`, CSP restritiva); o renderer só fala com o
+  processo principal por IPC validado.
+- Senhas de proxy são gravadas criptografadas (Electron `safeStorage`, chave do usuário do SO).
+- A ponte de proxy escuta apenas em `127.0.0.1`.
+- Excluir um perfil exige confirmação com a lista de nomes e um aceite explícito. Nenhuma outra
+  operação (atualização, reinstalação, troca de versão) apaga telefones virtuais ou perfis de navegador.
+- Se a pasta dos telefones virtuais estiver inacessível (por exemplo, unidade externa desconectada), o
+  app recusa iniciar perfis em vez de recriá-los vazios.
+
 ## Onde ficam os dados
 
 - Perfis, proxies e configurações: pasta de dados do app (mostrada em *Configurações*).

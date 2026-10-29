@@ -30,7 +30,12 @@ if (!gotLock) {
 }
 
 function boot() {
-  store = new Store(path.join(app.getPath('userData'), 'droiddesk-data.json'));
+  const { safeStorage } = require('electron');
+  const codec = safeStorage && safeStorage.isEncryptionAvailable() ? {
+    encrypt: (text) => `enc:${safeStorage.encryptString(text).toString('base64')}`,
+    decrypt: (text) => (text.startsWith('enc:') ? safeStorage.decryptString(Buffer.from(text.slice(4), 'base64')) : text),
+  } : null;
+  store = new Store(path.join(app.getPath('userData'), 'droiddesk-data.json'), codec);
   refreshSdk();
   Menu.setApplicationMenu(null);
   createWindow();
@@ -59,7 +64,8 @@ function createWindow() {
   });
   win.once('ready-to-show', () => win.show());
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) e.preventDefault(); });
   win.on('closed', () => { win = null; });
 }
 
@@ -108,6 +114,15 @@ app.on('window-all-closed', () => { app.quit(); });
 
 // ---------- helpers ----------
 const ok = (data) => ({ ok: true, data });
+// IPC payloads come from our own renderer, but validate shapes anyway.
+const asIds = (ids) => (Array.isArray(ids) ? ids.filter((x) => typeof x === 'string' && x.length <= 64).slice(0, 500) : []);
+const asObj = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? o : {});
+const asStr = (v, max = 4096) => (typeof v === 'string' ? v.slice(0, max) : '');
+function insideAllowedDirs(p) {
+  const target = path.resolve(asStr(p));
+  const roots = [app.getPath('userData'), avd.avdHome(store.settings.avdHome), sdkStatus ? sdkStatus.sdkPath : ''].filter(Boolean).map((r) => path.resolve(r));
+  return roots.some((r) => target === r || target.startsWith(r + path.sep));
+}
 const fail = (err) => ({ ok: false, error: typeof err === 'string' ? err : (err && err.message) || 'UNKNOWN' });
 function handle(channel, fn) {
   ipcMain.handle(channel, async (_e, ...args) => {
@@ -155,14 +170,20 @@ handle('app:info', () => ({
 }));
 handle('settings:get', () => store.settings);
 handle('settings:set', (patch) => {
+  patch = asObj(patch);
   const allowed = {};
-  for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode', 'javaHome', 'browserPath']) if (k in patch) allowed[k] = patch[k];
+  for (const k of ['language', 'sdkPath', 'avdHome', 'viewMode', 'javaHome', 'browserPath']) if (k in patch) allowed[k] = asStr(patch[k], 1024).trim();
+  if ('language' in allowed && !['pt-BR', 'en'].includes(allowed.language)) delete allowed.language;
+  if ('viewMode' in allowed && !['grid', 'list'].includes(allowed.viewMode)) delete allowed.viewMode;
+  for (const k of ['sdkPath', 'avdHome', 'javaHome', 'browserPath']) if (k in allowed && /["\r\n]/.test(allowed[k])) throw new Error('INVALID_PATH');
+  // Never silently move the virtual phones folder to a path that does not exist.
+  if (allowed.avdHome && !fs.existsSync(allowed.avdHome)) throw new Error('AVD_HOME_MISSING');
   const s = store.setSettings(allowed);
   refreshSdk();
   return s;
 });
 handle('shell:openExternal', (url) => { if (/^https?:\/\//.test(url)) shell.openExternal(url); });
-handle('shell:openPath', (p) => shell.openPath(p));
+handle('shell:openPath', (p) => { if (!insideAllowedDirs(p)) throw new Error('PATH_NOT_ALLOWED'); return shell.openPath(path.resolve(p)); });
 handle('dialog:pickFolder', async (title) => {
   const r = await dialog.showOpenDialog(win, { title, properties: ['openDirectory', 'createDirectory'] });
   return r.canceled ? null : r.filePaths[0];
@@ -375,6 +396,7 @@ handle('profiles:update', (id, input) => {
 });
 
 handle('profiles:move', (ids, groupId) => {
+  ids = asIds(ids);
   const gid = groupId && store.groups.some((g) => g.id === groupId) ? groupId : null;
   for (const p of store.profiles) if (ids.includes(p.id)) p.groupId = gid;
   store.save();
@@ -382,15 +404,22 @@ handle('profiles:move', (ids, groupId) => {
 });
 
 handle('profiles:delete', async (ids) => {
+  ids = asIds(ids);
+  const failed = [];
   for (const id of ids) {
-    await emu.stop(id).catch(() => { /* ignore */ });
     const p = store.profiles.find((x) => x.id === id);
     if (!p) continue;
-    avd.deleteAvd(p.avdId, store.settings.avdHome);
-    emu.instances.delete(id);
+    try {
+      await emu.stop(id);
+      avd.deleteAvd(p.avdId, store.settings.avdHome);
+      emu.instances.delete(id);
+      store.data.profiles = store.profiles.filter((x) => x.id !== id);
+      store.save();
+    } catch (err) {
+      failed.push(p.name);
+    }
   }
-  store.data.profiles = store.profiles.filter((x) => !ids.includes(x.id));
-  store.save();
+  if (failed.length) throw new Error(`DELETE_PARTIAL:${failed.join(', ')}`);
   return true;
 });
 
@@ -400,13 +429,19 @@ handle('profiles:start', async (id, opts = {}) => {
   refreshSdk();
   if (!sdkStatus.hasEmulator || !sdkStatus.hasAdb) throw new Error('SDK_MISSING');
   if (!avd.avdExists(p.avdId, store.settings.avdHome)) {
+    const home = avd.avdHome(store.settings.avdHome);
+    if (store.settings.avdHome && !fs.existsSync(home)) throw new Error('AVD_HOME_MISSING');
+    const siblings = fs.existsSync(home) ? fs.readdirSync(home).filter((n) => n.endsWith('.avd')).length : 0;
+    // The folder was removed outside the app. Only rebuild a blank phone if the
+    // AVD home itself is intact; never when every phone is "missing" at once.
+    if (store.profiles.length > 1 && siblings === 0 && store.profiles.some((x) => x.lastStartedAt)) throw new Error('AVD_HOME_MISSING');
     // AVD folder was deleted outside the app: recreate it from the profile.
     const image = sdkStatus.images.find((i) => i.id === p.imageId) || sdkStatus.images[0];
     if (!image) throw new Error('IMAGE_NOT_FOUND');
     avd.createAvd({ avdId: p.avdId, displayName: p.name, image, device: { ...meta.findDevice(p.deviceId), ...p.device, id: p.deviceId }, ram: p.ram, storage: p.storage, home: store.settings.avdHome });
   }
   const proxy = resolveProxy(p);
-  return emu.start(p, proxy, { avdHome: store.settings.avdHome, cold: !!opts.cold });
+  return emu.start(p, proxy, { avdHome: store.settings.avdHome, cold: !!asObj(opts).cold });
 });
 handle('profiles:stop', (id) => emu.stop(id));
 handle('profiles:log', (id) => emu.getLog(id));
@@ -498,20 +533,29 @@ handle('browsers:update', (id, input) => {
   return publicBrowser(p);
 });
 handle('browsers:move', (ids, groupId) => {
+  ids = asIds(ids);
   const gid = groupId && store.groups.some((g) => g.id === groupId) ? groupId : null;
   for (const p of store.browsers) if (ids.includes(p.id)) p.groupId = gid;
   store.save();
   return true;
 });
 handle('browsers:delete', async (ids) => {
+  ids = asIds(ids);
+  const failed = [];
   for (const id of ids) {
-    await bm.stop(id).catch(() => {});
     const p = store.browsers.find((x) => x.id === id);
-    if (p) fs.rmSync(browserDataDir(p), { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
-    bm.instances.delete(id);
+    if (!p) continue;
+    try {
+      await bm.stop(id);
+      fs.rmSync(browserDataDir(p), { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      bm.instances.delete(id);
+      store.data.browsers = store.browsers.filter((x) => x.id !== id);
+      store.save();
+    } catch (err) {
+      failed.push(p.name);
+    }
   }
-  store.data.browsers = store.browsers.filter((x) => !ids.includes(x.id));
-  store.save();
+  if (failed.length) throw new Error(`DELETE_PARTIAL:${failed.join(', ')}`);
   return true;
 });
 handle('browsers:start', async (id) => {

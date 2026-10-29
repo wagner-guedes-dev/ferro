@@ -213,9 +213,13 @@ const MOCK = `
   await page.locator('.card[data-id="p3"] .sel').check();
   await page.locator('[data-bulk="delete"]').click();
   await page.waitForSelector('[data-x="cancel"]');
+  assert.ok((await page.locator('#modal li').innerText()).includes('wagner tiktok gringo'));
   await page.locator('[data-x="cancel"]').click();
   assert.strictEqual(await page.locator('.card').count(), 4);
   await page.locator('[data-bulk="delete"]').click();
+  await page.waitForSelector('[data-x="ok"]');
+  assert.ok(await page.locator('[data-x="ok"]').isDisabled()); // must acknowledge first
+  await page.locator('label:has(#cf-ack)').click();
   await page.locator('[data-x="ok"]').click();
   await page.waitForFunction(() => document.querySelectorAll('.card').length === 3);
 
@@ -263,6 +267,7 @@ const MOCK = `
   await shot('08-browsers');
   await page.locator('.card[data-bid] [data-menu]').click();
   await page.locator('#ctx [data-m="delete"]').click();
+  await page.locator('label:has(#cf-ack)').click();
   await page.locator('[data-x="ok"]').click();
   await page.waitForSelector('#bempty-new');
 

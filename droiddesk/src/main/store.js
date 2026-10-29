@@ -6,8 +6,9 @@ const crypto = require('crypto');
 // Small JSON store with atomic writes. All app data lives in a single file
 // inside Electron's userData folder.
 class Store {
-  constructor(file) {
+  constructor(file, codec = null) {
     this.file = file;
+    this.codec = codec; // { encrypt(text) -> string, decrypt(text) -> string } for proxy passwords
     this.data = {
       version: 1,
       settings: { language: 'pt-BR', sdkPath: '', avdHome: '', nextSerial: 1 },
@@ -32,6 +33,7 @@ class Store {
           profiles: Array.isArray(raw.profiles) ? raw.profiles : [],
           browsers: Array.isArray(raw.browsers) ? raw.browsers : [],
         };
+        this._mapSecrets((v) => this._decrypt(v));
       }
     } catch (err) {
       // Corrupted file: keep a backup and start fresh rather than crash.
@@ -43,8 +45,25 @@ class Store {
     const dir = path.dirname(this.file);
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf8');
+    const snapshot = JSON.parse(JSON.stringify(this.data));
+    if (this.codec) {
+      const enc = (v) => (typeof v === 'string' && v && !v.startsWith('enc:') ? this.codec.encrypt(v) : v);
+      for (const px of snapshot.proxies) px.password = enc(px.password);
+      for (const list of [snapshot.profiles, snapshot.browsers]) for (const p of list) if (p.proxy) p.proxy.password = enc(p.proxy.password);
+    }
+    fs.writeFileSync(tmp, JSON.stringify(snapshot, null, 2), 'utf8');
     fs.renameSync(tmp, this.file);
+  }
+
+  _decrypt(v) {
+    if (typeof v !== 'string' || !v.startsWith('enc:')) return v;
+    if (!this.codec) return v; // encrypted on another machine/user: keep as is
+    try { return this.codec.decrypt(v); } catch (_) { return v; }
+  }
+
+  _mapSecrets(fn) {
+    for (const px of this.data.proxies) px.password = fn(px.password);
+    for (const list of [this.data.profiles, this.data.browsers]) for (const p of list) if (p && p.proxy) p.proxy.password = fn(p.proxy.password);
   }
 
   static newId() {

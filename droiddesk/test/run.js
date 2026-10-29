@@ -377,6 +377,28 @@ test('pingProxy measures a round trip through the tunnel', async () => {
   server.close(); origin.close();
 });
 
+test('store encrypts proxy passwords at rest with a codec', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dd-codec-'));
+  const file = path.join(dir, 'data.json');
+  const codec = { encrypt: (t) => `enc:${Buffer.from(t).toString('base64')}`, decrypt: (t) => Buffer.from(t.slice(4), 'base64').toString() };
+  const s = new Store(file, codec);
+  s.proxies.push({ id: 'a', password: 'secret1' });
+  s.profiles.push({ id: 'p', proxy: { password: 'secret2' } });
+  s.browsers.push({ id: 'b', proxy: { password: '' } });
+  s.save();
+  const raw = fs.readFileSync(file, 'utf8');
+  assert.ok(!raw.includes('secret1') && !raw.includes('secret2'));
+  assert.ok(raw.includes('enc:'));
+  const s2 = new Store(file, codec);
+  assert.strictEqual(s2.proxies[0].password, 'secret1');
+  assert.strictEqual(s2.profiles[0].proxy.password, 'secret2');
+  assert.strictEqual(s2.browsers[0].proxy.password, '');
+  // without a codec the encrypted value is kept untouched (not corrupted)
+  const s3 = new Store(file, null);
+  assert.ok(s3.proxies[0].password.startsWith('enc:'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('meta helpers', () => {
   assert.strictEqual(meta.androidVersionName(34), '14');
   assert.strictEqual(meta.androidVersionName(99), 'API 99');

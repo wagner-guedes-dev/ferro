@@ -273,6 +273,7 @@ function runSdkmanager(bin, sdkPath, args, log, java) {
 // Full installer: command-line tools -> platform-tools + emulator + system image.
 async function install({ sdkPath, api = 34, tag = 'google_apis', abi, javaHome }, log) {
   sdkPath = sdkPath || defaultSdkInstallPath();
+  if (/["\r\n]/.test(sdkPath)) throw new Error('INVALID_PATH');
   const java = await findJava(javaHome);
   if (!java) throw new Error('JAVA_MISSING');
   log(`Java encontrado: ${java.version} (${java.home || 'PATH'})`);
