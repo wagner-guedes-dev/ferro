@@ -5,32 +5,22 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
   <title>DroidDesk HUD</title>
   <style>
-    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font-family: "Segoe UI", Inter, system-ui, sans-serif; user-select: none; }
-    .hud { -webkit-app-region: drag; box-sizing: border-box; height: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 10px; border-radius: 12px; background: rgba(12, 14, 20, 0.92); border: 1px solid rgba(255,255,255,0.12); color: #e6e8ee; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
-    .sig { display: inline-flex; align-items: flex-end; gap: 2px; height: 16px; flex: none; }
-    .sig i { display: block; width: 4px; border-radius: 1px; background: #2c3140; }
-    .sig i:nth-child(1) { height: 6px; } .sig i:nth-child(2) { height: 9px; } .sig i:nth-child(3) { height: 12px; } .sig i:nth-child(4) { height: 16px; }
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+    .hud { box-sizing: border-box; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 9px; background: rgba(12, 14, 20, 0.9); border: 1px solid rgba(255,255,255,0.14); }
+    .sig { display: inline-flex; align-items: flex-end; gap: 3px; height: 18px; }
+    .sig i { display: block; width: 4px; border-radius: 1px; background: #3b4252; }
+    .sig i:nth-child(1) { height: 6px; } .sig i:nth-child(2) { height: 10px; } .sig i:nth-child(3) { height: 14px; } .sig i:nth-child(4) { height: 18px; }
     .q4 .sig i, .q3 .sig i:nth-child(-n+3) { background: #22c55e; }
     .q2 .sig i:nth-child(-n+2) { background: #f59e0b; }
     .q1 .sig i:nth-child(1) { background: #f97316; }
     .q0 .sig i { background: #ef4444; }
-    .qx .sig i { background: #3b4252; animation: pulse 1s infinite; }
+    .q0 { border-color: rgba(239,68,68,.6); }
+    .qx .sig i { animation: pulse 1s infinite; }
     @keyframes pulse { 50% { opacity: .3; } }
-    .txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; }
-    .name { font-size: 11px; color: #9aa1b2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
-    .val { font-size: 13px; font-weight: 600; white-space: nowrap; }
-    .q0 .val { color: #ef4444; } .q1 .val { color: #f97316; } .q2 .val { color: #f59e0b; } .q3 .val, .q4 .val { color: #22c55e; }
-    .sub { font-size: 10px; color: #6b7284; white-space: nowrap; }
-    .close { -webkit-app-region: no-drag; margin-left: auto; width: 18px; height: 18px; border-radius: 50%; border: 0; background: rgba(255,255,255,.08); color: #9aa1b2; font-size: 12px; line-height: 18px; text-align: center; cursor: pointer; padding: 0; flex: none; }
-    .close:hover { background: rgba(239,68,68,.35); color: #fff; }
   </style>
 </head>
 <body>
-  <div class="hud qx" id="hud">
-    <span class="sig"><i></i><i></i><i></i><i></i></span>
-    <div class="txt"><div class="name" id="name">DroidDesk</div><div class="val" id="val">…</div><div class="sub" id="sub"></div></div>
-    <button class="close" id="close" title="Ocultar">×</button>
-  </div>
+  <div class="hud qx" id="hud" title="DroidDesk"><span class="sig"><i></i><i></i><i></i><i></i></span></div>
   <script src="hud.js"></script>
 </body>
 </html>
