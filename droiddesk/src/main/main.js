@@ -42,11 +42,7 @@ function boot() {
   Menu.setApplicationMenu(null);
   createWindow();
   updater = setupUpdater({ send, getWindow: () => win });
-  hud = new HudManager({
-    getLang: () => store.settings.language || 'pt-BR',
-    getOffset: (key) => (store.settings.hudOffsets || {})[key] || null,
-    setOffset: (key, value) => { store.settings.hudOffsets = { ...(store.settings.hudOffsets || {}), [key]: value }; store.save(); },
-  });
+  hud = new HudManager({ getLang: () => store.settings.language || 'pt-BR' });
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
@@ -87,7 +83,7 @@ function syncSignal(kind, mgr, e) {
     signal.track(key, { kind, profileId: e.profileId, proxy: inst.proxy });
     const p = (kind === 'browser' ? store.browsers : store.profiles).find((x) => x.id === e.profileId);
     if (hud && p && store.settings.proxyHud !== false) {
-      hud.show(key, { name: p.name, kind, title: kind === 'profile' ? `${p.avdId}:${p.port}` : '', proxyLabel: `${inst.proxy.type.toUpperCase()} ${inst.proxy.host}:${inst.proxy.port}` });
+      hud.show(key, { name: p.name, kind, title: kind === 'profile' ? `${p.avdId}:${p.port}` : '', pid: inst.child ? inst.child.pid : null });
     }
   } else if (e.status === 'stopped') {
     signal.untrack(key);

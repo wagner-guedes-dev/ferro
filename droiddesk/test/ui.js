@@ -354,17 +354,15 @@ const MOCK = `
   await page.waitForSelector('#modal-bg.open', { state: 'hidden' });
 
   // 17. HUD page renders updates
-  const hudPage = await browser.newPage({ viewport: { width: 200, height: 60 } });
+  const hudPage = await browser.newPage({ viewport: { width: 36, height: 30 } });
   hudPage.on('pageerror', (e) => errors.push(`hud pageerror: ${e.message}`));
-  await hudPage.addInitScript(() => { const cbs = []; window.hud = { onUpdate: (cb) => cbs.push(cb), close: () => { window.__closed = true; } }; window.__push = (d) => cbs.forEach((cb) => cb(d)); });
+  await hudPage.addInitScript(() => { const cbs = []; window.hud = { onUpdate: (cb) => cbs.push(cb) }; window.__push = (d) => cbs.forEach((cb) => cb(d)); });
   await hudPage.goto('file://' + path.join(__dirname, '..', 'src', 'renderer', 'hud.html'));
   await hudPage.evaluate(() => window.__push({ lang: 'pt-BR', name: 'Nerd Anim TikTok', quality: 'good', latency: 230, avg: 240, stability: 100, samples: 4 }));
-  assert.ok((await hudPage.locator('#val').innerText()).includes('230 ms'));
   assert.ok(await hudPage.locator('#hud.q3').count() === 1);
+  assert.ok((await hudPage.getAttribute('#hud', 'title')).includes('230 ms'));
   await hudPage.evaluate(() => window.__push({ quality: 'down', latency: null, samples: 4, avg: null, stability: 20 }));
   assert.ok(await hudPage.locator('#hud.q0').count() === 1);
-  await hudPage.locator('#close').click();
-  assert.strictEqual(await hudPage.evaluate(() => window.__closed), true);
   await hudPage.screenshot({ path: path.join(outDir, '09-hud.png') });
 
   await browser.close();
