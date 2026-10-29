@@ -100,7 +100,7 @@ class HudManager {
     const hud = this.huds.get(key);
     if (!hud) return;
     this.huds.delete(key);
-    try { if (!hud.win.isDestroyed()) hud.win.destroy(); } catch (_) { /* ignore */ }
+    try { if (!hud.win.isDestroyed()) { hud.win.hide(); hud.win.destroy(); } } catch (_) { /* ignore */ }
     if (!this.huds.size) this._stopTracker();
   }
 
@@ -124,6 +124,9 @@ class HudManager {
       const file = path.join(app.getPath('userData'), 'hud-tracker.ps1');
       fs.writeFileSync(file, PS_SCRIPT, 'utf8');
       this.ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+      // A closed pipe (helper exited) must never become an unhandled 'error'.
+      this.ps.stdin.on('error', () => {});
+      this.ps.stdout.on('error', () => {});
       let buf = '';
       this.ps.stdout.on('data', (c) => {
         buf += String(c);
@@ -138,10 +141,12 @@ class HudManager {
 
   _stopTracker() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
-    if (this.ps) { try { this.ps.stdin.end(); this.ps.kill(); } catch (_) { /* ignore */ } this.ps = null; }
+    const ps = this.ps;
+    this.ps = null;
+    if (ps) { try { ps.stdin.end(); } catch (_) { /* ignore */ } try { ps.kill(); } catch (_) { /* ignore */ } }
   }
 
-  _write(line) { if (this.ps && this.ps.stdin.writable) { try { this.ps.stdin.write(`${line}\n`); } catch (_) { /* ignore */ } } }
+  _write(line) { const ps = this.ps; if (ps && !ps.killed && ps.stdin && ps.stdin.writable) { try { ps.stdin.write(`${line}\n`); } catch (_) { /* ignore */ } } }
 
   _poll() {
     for (const hud of this.huds.values()) {

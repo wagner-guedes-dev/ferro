@@ -108,6 +108,8 @@ class BrowserManager extends EventEmitter {
       const onOut = (c) => { for (const l of String(c).split(/\r?\n/)) if (l.trim()) this._log(inst, l.trim()); };
       child.stdout.on('data', onOut);
       child.stderr.on('data', onOut);
+      child.stdout.on('error', () => {});
+      child.stderr.on('error', () => {});
       child.on('error', (err) => { this._log(inst, `Erro ao iniciar navegador: ${err.message}`); this._cleanup(inst, 'spawn'); });
       child.on('exit', (code) => { this._log(inst, `Navegador fechado (code=${code}).`); this._cleanup(inst, inst.status === 'stopping' || code === 0 || code === null ? '' : 'EXITED'); });
       setTimeout(() => { if (inst.status === 'starting') this._set(inst, 'running'); }, 1500);

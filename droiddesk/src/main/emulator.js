@@ -114,6 +114,8 @@ class EmulatorManager extends EventEmitter {
       };
       child.stdout.on('data', onOut);
       child.stderr.on('data', onOut);
+      child.stdout.on('error', () => {});
+      child.stderr.on('error', () => {});
       child.on('error', (err) => {
         this._log(inst, `Erro ao iniciar emulador: ${err.message}`);
         this._cleanup(inst, `spawn: ${err.message}`);
@@ -274,6 +276,21 @@ function killNetsimd() {
   });
 }
 
+// Kill any emulator/qemu process still using this AVD (e.g. left over after a
+// crash), so its files can be deleted. Resolves true if something was killed.
+function killStrayEmulator(avdId) {
+  return new Promise((resolve) => {
+    if (IS_WIN) {
+      const script = `$n=0; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*-avd ${avdId}*' -or $_.CommandLine -like '*${avdId}.avd*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $n++ }; Write-Output $n`;
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { windowsHide: true, timeout: 20000 }, (err, stdout) => {
+        resolve(!err && parseInt(String(stdout).trim(), 10) > 0);
+      });
+    } else {
+      execFile('pkill', ['-9', '-f', `-avd ${avdId}`], { timeout: 10000 }, (err) => resolve(!err));
+    }
+  });
+}
+
 function killTree(child) {
   try {
     if (IS_WIN) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
@@ -283,4 +300,4 @@ function killTree(child) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
-module.exports = { EmulatorManager };
+module.exports = { EmulatorManager, killStrayEmulator };

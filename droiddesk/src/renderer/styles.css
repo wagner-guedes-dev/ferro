@@ -120,8 +120,9 @@ a { color: var(--accent); }
 .card .status { font-size: 11px; padding: 3px 9px; border-radius: 20px; font-weight: 600; letter-spacing: .2px; flex: none; }
 .status.stopped { background: var(--border); color: var(--text-2); }
 .status.running { background: var(--green-soft); color: var(--green); }
-.status.starting, .status.stopping { background: var(--yellow-soft); color: var(--yellow); }
-.status.starting::before, .status.stopping::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; animation: pulse 1s infinite; }
+.status.deleting { background: var(--red-soft); color: var(--red); }
+.status.starting, .status.stopping, .status.deleting { background: var(--yellow-soft); color: var(--yellow); }
+.status.starting::before, .status.stopping::before, .status.deleting::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 6px; animation: pulse 1s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 .card .row { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 14px; min-height: 22px; }
 .card .row svg { width: 18px; height: 18px; stroke: var(--text-2); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }

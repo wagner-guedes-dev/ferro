@@ -7,7 +7,7 @@ const sdk = require('./sdk');
 const avd = require('./avd');
 const proxyLib = require('./proxy');
 const meta = require('./meta');
-const { EmulatorManager } = require('./emulator');
+const { EmulatorManager, killStrayEmulator } = require('./emulator');
 const { setupUpdater } = require('./updater');
 const browsers = require('./browsers');
 const { SignalMonitor } = require('./signal');
@@ -22,6 +22,23 @@ let hud = null;
 signal.on('signal', (e) => { send('signal', e); if (hud && e.quality !== 'off') hud.update(e.key, e); });
 let sdkStatus = null;
 let updater = null;
+
+// Safety net: log unexpected errors instead of letting the whole app die.
+function logError(kind, err) {
+  try {
+    const file = path.join(app.getPath('userData'), 'droiddesk-error.log');
+    const text = `[${new Date().toISOString()}] ${kind}: ${err && err.stack ? err.stack : String(err)}\n`;
+    fs.appendFileSync(file, text);
+    if (fs.statSync(file).size > 2 * 1024 * 1024) fs.writeFileSync(file, text);
+  } catch (_) { /* ignore */ }
+}
+process.on('uncaughtException', (err) => {
+  logError('uncaughtException', err);
+  if (win && !win.isDestroyed()) {
+    dialog.showMessageBox(win, { type: 'error', title: 'DroidDesk', message: 'Ocorreu um erro interno, mas o app continua funcionando.', detail: `${err && err.message ? err.message : err}\n\nO detalhe foi gravado em droiddesk-error.log na pasta de dados (Configurações → Abrir).`, buttons: ['OK'] }).catch(() => {});
+  }
+});
+process.on('unhandledRejection', (reason) => { logError('unhandledRejection', reason); });
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -70,6 +87,7 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith('file://')) e.preventDefault(); });
   win.on('closed', () => { win = null; });
+  win.webContents.on('render-process-gone', (_e, details) => { logError('render-process-gone', new Error(details.reason)); if (win && !win.isDestroyed()) win.webContents.reload(); });
 }
 
 function send(channel, payload) {
@@ -138,7 +156,10 @@ function insideAllowedDirs(p) {
 const fail = (err) => ({ ok: false, error: typeof err === 'string' ? err : (err && err.message) || 'UNKNOWN' });
 function handle(channel, fn) {
   ipcMain.handle(channel, async (_e, ...args) => {
-    try { return ok(await fn(...args)); } catch (err) { return fail(err); }
+    try { return ok(await fn(...args)); } catch (err) {
+      if (!(err && /^[A-Z_]+(:.*)?$/.test(String(err.message || err)))) logError(`ipc ${channel}`, err);
+      return fail(err);
+    }
   });
 }
 
@@ -416,21 +437,28 @@ handle('profiles:move', (ids, groupId) => {
   return true;
 });
 
+const deleting = new Set();
 handle('profiles:delete', async (ids) => {
-  ids = asIds(ids);
+  ids = asIds(ids).filter((id) => !deleting.has(id));
   const failed = [];
   for (const id of ids) {
     const p = store.profiles.find((x) => x.id === id);
     if (!p) continue;
+    deleting.add(id);
+    send('profile:status', { profileId: id, status: 'deleting', detail: '' });
     try {
       await emu.stop(id);
-      avd.deleteAvd(p.avdId, store.settings.avdHome);
       emu.instances.delete(id);
+      // A crashed/orphaned emulator may still hold the phone's files.
+      if (avd.avdLocked(p.avdId, store.settings.avdHome) || await killStrayEmulator(p.avdId)) await new Promise((r) => setTimeout(r, 1500));
+      await avd.deleteAvd(p.avdId, store.settings.avdHome);
       store.data.profiles = store.profiles.filter((x) => x.id !== id);
       store.save();
     } catch (err) {
+      logError('profiles:delete', err);
       failed.push(p.name);
-    }
+      send('profile:status', { profileId: id, status: 'stopped', detail: '' });
+    } finally { deleting.delete(id); }
   }
   if (failed.length) throw new Error(`DELETE_PARTIAL:${failed.join(', ')}`);
   return true;
@@ -553,20 +581,24 @@ handle('browsers:move', (ids, groupId) => {
   return true;
 });
 handle('browsers:delete', async (ids) => {
-  ids = asIds(ids);
+  ids = asIds(ids).filter((id) => !deleting.has(id));
   const failed = [];
   for (const id of ids) {
     const p = store.browsers.find((x) => x.id === id);
     if (!p) continue;
+    deleting.add(id);
+    send('browser:status', { profileId: id, status: 'deleting', detail: '' });
     try {
       await bm.stop(id);
-      fs.rmSync(browserDataDir(p), { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
       bm.instances.delete(id);
+      await fs.promises.rm(browserDataDir(p), { recursive: true, force: true, maxRetries: 12, retryDelay: 250 });
       store.data.browsers = store.browsers.filter((x) => x.id !== id);
       store.save();
     } catch (err) {
+      logError('browsers:delete', err);
       failed.push(p.name);
-    }
+      send('browser:status', { profileId: id, status: 'stopped', detail: '' });
+    } finally { deleting.delete(id); }
   }
   if (failed.length) throw new Error(`DELETE_PARTIAL:${failed.join(', ')}`);
   return true;

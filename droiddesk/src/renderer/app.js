@@ -302,7 +302,7 @@
   // ------------------------------------------------------------ context menu
   function openMenu(anchor, id) {
     const p = state.profiles.find((x) => x.id === id);
-    if (!p) return;
+    if (!p || p.status === 'deleting') return;
     const ctx = $('#ctx');
     const running = p.status !== 'stopped';
     ctx.innerHTML = `
@@ -681,7 +681,7 @@
     } finally { bulkBusy = false; setToolbarBusy('#view-browsers .toolbar', false); }
   }
   function openBrowserMenu(anchor, id) {
-    const p = state.browsers.find((x) => x.id === id); if (!p) return;
+    const p = state.browsers.find((x) => x.id === id); if (!p || p.status === 'deleting') return;
     const ctx = $('#ctx');
     const running = p.status !== 'stopped';
     ctx.innerHTML = `
@@ -985,9 +985,10 @@
   api.profiles.onStatus((e) => {
     const p = state.profiles.find((x) => x.id === e.profileId);
     if (!p) return;
+    const prevStatus = p.status;
     p.status = e.status;
     if (e.status === 'stopped' && e.detail) toast(`${p.name}: ${t(`exit_${e.detail}`) !== `exit_${e.detail}` ? t(`exit_${e.detail}`) : e.detail}`, 'err', 9000);
-    else if (e.status === 'stopped') toast(t('toast_stopped', { name: p.name }), 'info');
+    else if (e.status === 'stopped' && prevStatus !== 'deleting') toast(t('toast_stopped', { name: p.name }), 'info');
     else if (e.status === 'running' && e.detail) toast(`${p.name}: ${t(`exit_${e.detail}`)}`, 'warn');
     renderProfiles();
   });
