@@ -988,7 +988,7 @@
     const prevStatus = p.status;
     p.status = e.status;
     if (e.status === 'stopped' && e.detail) toast(`${p.name}: ${t(`exit_${e.detail}`) !== `exit_${e.detail}` ? t(`exit_${e.detail}`) : e.detail}`, 'err', 9000);
-    else if (e.status === 'stopped' && prevStatus !== 'deleting') toast(t('toast_stopped', { name: p.name }), 'info');
+    else if (e.status === 'stopped' && prevStatus !== 'deleting' && prevStatus !== 'stopped') toast(t('toast_stopped', { name: p.name }), 'info');
     else if (e.status === 'running' && e.detail) toast(`${p.name}: ${t(`exit_${e.detail}`)}`, 'warn');
     renderProfiles();
   });
