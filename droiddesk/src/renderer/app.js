@@ -822,7 +822,8 @@
     const yesno = (ok, label) => `<span class="badge ${ok ? 'ok' : 'bad'}">${ok ? '●' : '○'} ${esc(label)}</span>`;
     const apis = [36, 35, 34, 33, 32, 31, 30, 29, 28];
     root.innerHTML = `
-      <div class="panel"><h4>${esc(t('language'))}</h4><div class="kv"><div class="k">${esc(t('language'))}</div><div class="v"><select class="select" id="st-lang"><option value="pt-BR" ${I18N.getLang() === 'pt-BR' ? 'selected' : ''}>Português (Brasil)</option><option value="en" ${I18N.getLang() === 'en' ? 'selected' : ''}>English</option></select></div></div></div>
+      <div class="panel"><h4>${esc(t('language'))}</h4><div class="kv"><div class="k">${esc(t('language'))}</div><div class="v"><select class="select" id="st-lang"><option value="pt-BR" ${I18N.getLang() === 'pt-BR' ? 'selected' : ''}>Português (Brasil)</option><option value="en" ${I18N.getLang() === 'en' ? 'selected' : ''}>English</option></select></div>
+        <div class="k">${esc(t('hud_setting'))}</div><div class="v"><label style="display:flex;gap:10px;align-items:center;cursor:pointer"><input type="checkbox" class="checkbox" id="st-hud" ${state.settings.proxyHud === false ? '' : 'checked'}><span style="font-size:13px;color:var(--text-2)">${esc(t('hud_setting_hint'))}</span></label></div></div></div>
       <div class="panel"><h4>${esc(t('upd_section'))}</h4><div class="kv">
         <div class="k">${esc(t('upd_current'))}</div><div class="v">v${esc(state.info.version)}</div>
         <div class="k">${esc(t('col_status'))}</div><div class="v" id="upd-status">${esc(updateText())}</div>
@@ -856,6 +857,7 @@
     const ui = $('#upd-install', root); if (ui) ui.onclick = () => api.update.install();
     $('#st-browser-browse', root).onclick = async () => { const r = await call(api.dialog.openFile({ title: t('browser_path'), filters: [{ name: 'Browser', extensions: state.info.platform === 'win32' ? ['exe'] : ['*'] }] })); if (r && r.path) $('#st-browser', root).value = r.path; };
     $('#st-browser-save', root).onclick = async () => { state.settings = await call(api.settings.set({ browserPath: $('#st-browser', root).value.trim() })); state.detectedBrowsers = await call(api.browsers.detect()); toast(t('toast_saved'), 'ok'); renderSettings(); renderBrowsers(); };
+    $('#st-hud', root).onchange = async (e) => { state.settings = await call(api.settings.set({ proxyHud: e.target.checked })); toast(t('toast_saved'), 'ok'); };
     $('#st-lang', root).onchange = async (e) => { await call(api.settings.set({ language: e.target.value })); I18N.setLang(e.target.value); applyI18n(); renderAll(); };
     $('#st-browse', root).onclick = async () => { const p = await call(api.dialog.pickFolder(t('sdk_path'))); if (p) $('#st-sdk', root).value = p; };
     $('#st-save-sdk', root).onclick = async () => { await call(api.settings.set({ sdkPath: $('#st-sdk', root).value.trim() })); await reloadSdk(); renderProfiles(); toast(t('toast_saved'), 'ok'); };
